@@ -64,7 +64,7 @@ def screen(
     # 강제 새로고침: 캐시 클리어
     if refresh:
         with _lock:
-            _last_result_ref = None
+            _last_result = None  # type: ignore[assignment]
         has_cache = False
 
     # 캐시 있으면 바로 반환
