@@ -52,7 +52,7 @@ def screen(
     limit: int = Query(50, ge=1, le=200),
     refresh: bool = Query(False, description="강제 새로고침"),
 ) -> dict:
-    global _running
+    global _running, _last_result, _last_error  # must declare all globals we assign to
 
     market_filter = market.upper() if market else None
 
@@ -64,7 +64,7 @@ def screen(
     # 강제 새로고침: 캐시 클리어
     if refresh:
         with _lock:
-            _last_result = None  # type: ignore[assignment]
+            _last_result = None
         has_cache = False
 
     # 캐시 있으면 바로 반환
