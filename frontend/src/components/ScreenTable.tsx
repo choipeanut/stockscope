@@ -51,12 +51,17 @@ export function ScreenTable({ onDrillDown }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("composite");
   const [sortAsc, setSortAsc] = useState(false);
 
+  const [triggered, setTriggered] = useState(false);
+
   const { data, isFetching, error, refetch } = useQuery({
     queryKey: ["screen", market, minScore],
     queryFn: () => fetchScreen(market || undefined, minScore, 100),
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
-    enabled: false,
+    enabled: triggered,
+    // 백그라운드 실행 중이면 3초마다 폴링
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 3000 : false,
   });
 
   function toggleSort(key: SortKey) {
@@ -146,17 +151,17 @@ export function ScreenTable({ onDrillDown }: Props) {
         </div>
 
         <button
-          onClick={() => refetch()}
-          disabled={isFetching}
+          onClick={() => { setTriggered(true); refetch(); }}
+          disabled={isFetching || data?.status === "running"}
           style={{
-            background: isFetching ? "#1f2937" : "#3b82f6",
+            background: (isFetching || data?.status === "running") ? "#1f2937" : "#3b82f6",
             border: "none", borderRadius: 6, color: "#fff",
             padding: "7px 18px", fontSize: 13, fontWeight: 600,
-            cursor: isFetching ? "not-allowed" : "pointer",
-            opacity: isFetching ? 0.7 : 1,
+            cursor: (isFetching || data?.status === "running") ? "not-allowed" : "pointer",
+            opacity: (isFetching || data?.status === "running") ? 0.7 : 1,
           }}
         >
-          {isFetching ? "스크리닝 중..." : "스크린 실행"}
+          {data?.status === "running" ? "⏳ 분석 중..." : isFetching ? "로딩 중..." : "스크린 실행"}
         </button>
 
         {data?.stale && (
@@ -178,11 +183,23 @@ export function ScreenTable({ onDrillDown }: Props) {
         </div>
       )}
 
-      {isFetching && (
+      {data?.status === "running" && (
         <div style={{
-          textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 14,
+          textAlign: "center", padding: "32px 0",
         }}>
-          종목 분석 중입니다. 최대 2분 소요될 수 있습니다...
+          <div style={{ fontSize: 32, marginBottom: 12 }}>🔍</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: "#f9fafb", marginBottom: 6 }}>
+            50개 종목 분석 중...
+          </div>
+          <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
+            백그라운드에서 실행 중 · 결과가 나오면 자동으로 표시됩니다
+          </div>
+          <div style={{
+            display: "inline-block", background: "#1f2937",
+            borderRadius: 8, padding: "8px 20px", fontSize: 12, color: "#9ca3af",
+          }}>
+            보통 20~30초 소요
+          </div>
         </div>
       )}
 
