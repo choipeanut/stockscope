@@ -5,7 +5,9 @@ NASDAQ 종목: USD 가격 × USD/KRW 환율로 변환 후 저장.
 """
 from __future__ import annotations
 
+import json
 import time
+import urllib.request
 
 from app.collectors.prices import get_ohlcv
 from app.db import repo
@@ -20,21 +22,55 @@ class TradeError(ValueError):
 
 
 def _get_usd_krw() -> float:
-    """USD/KRW 환율 조회 (yfinance). 30분 캐시."""
+    """USD/KRW 환율 조회. 30분 캐시.
+    Method 1: yfinance USDKRW=X history
+    Method 2: fawazahmed0 무료 환율 API (GitHub CDN)
+    Method 3: exchangerate-api.com 무료
+    Fallback: 1400
+    """
     now = time.time()
     if "rate" in _fx_cache and now - _fx_cache.get("ts", 0) < _FX_TTL:
         return _fx_cache["rate"]
 
-    rate = 1400.0  # fallback
+    rate = None
+
+    # Method 1: yfinance history (fast_info보다 FX에서 안정적)
     try:
         import yfinance as yf
-        tk = yf.Ticker("USDKRW=X")
-        fi = tk.fast_info
-        r = float(fi.last_price)
-        if 900 < r < 2000:  # sanity check
-            rate = round(r, 1)
+        hist = yf.Ticker("USDKRW=X").history(period="1d")
+        if not hist.empty:
+            r = float(hist["Close"].iloc[-1])
+            if 900 < r < 2500:
+                rate = round(r, 1)
     except Exception:
         pass
+
+    # Method 2: fawazahmed0 GitHub-hosted free API (rate limit 없음)
+    if not rate:
+        try:
+            url = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json"
+            with urllib.request.urlopen(url, timeout=6) as resp:
+                data = json.loads(resp.read().decode())
+                r = data.get("usd", {}).get("krw")
+                if r and 900 < r < 2500:
+                    rate = round(float(r), 1)
+        except Exception:
+            pass
+
+    # Method 3: exchangerate-api.com 무료 티어
+    if not rate:
+        try:
+            url = "https://api.exchangerate-api.com/v4/latest/USD"
+            with urllib.request.urlopen(url, timeout=6) as resp:
+                data = json.loads(resp.read().decode())
+                r = data.get("rates", {}).get("KRW")
+                if r and 900 < r < 2500:
+                    rate = round(float(r), 1)
+        except Exception:
+            pass
+
+    if not rate:
+        rate = 1400.0  # 최후 fallback
 
     _fx_cache["rate"] = rate
     _fx_cache["ts"] = now
