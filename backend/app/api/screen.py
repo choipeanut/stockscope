@@ -86,7 +86,8 @@ def _run_sync(market_filter: str | None) -> list[dict]:
     pool = ThreadPoolExecutor(max_workers=8)
     try:
         future_map = {
-            pool.submit(_safe_score_ticker, item["ticker"], item["market"]): item
+            # 스크리너는 90일치 — 데이터 적어서 yfinance 응답 빠름
+            pool.submit(_safe_score_ticker, item["ticker"], item["market"], 90): item
             for item in tickers
         }
         # wall-clock 타임아웃: 완료된 것만 수집

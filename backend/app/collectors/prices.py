@@ -67,27 +67,68 @@ def _normalize(df: pd.DataFrame, market: Market) -> pd.DataFrame:
     return df
 
 
+def _make_yf_session(timeout: int = 20):
+    """yfinance용 requests.Session — 각 HTTP 요청에 timeout 적용."""
+    import requests
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+    })
+    # requests.Session.send 에 기본 timeout 주입
+    _orig_send = session.send
+
+    def _send_with_timeout(*args, **kwargs):
+        kwargs.setdefault("timeout", timeout)
+        return _orig_send(*args, **kwargs)
+
+    session.send = _send_with_timeout  # type: ignore[method-assign]
+    return session
+
+
 def _fetch_kr(ticker: str, start: str, end: str) -> pd.DataFrame:
-    from pykrx import stock as pykrx_stock
+    """한국 주식 OHLCV 취득. pykrx → FinanceDataReader → yfinance .KS 순서로 폴백."""
+    # Method 1: pykrx
+    try:
+        from pykrx import stock as pykrx_stock
+        df = pykrx_stock.get_market_ohlcv_by_date(start, end, ticker)
+        if df is not None and not df.empty:
+            return df
+    except Exception:
+        pass
 
-    df = pykrx_stock.get_market_ohlcv_by_date(start, end, ticker)
-    if df is None or df.empty:
-        # Fallback to finance-datareader
+    # Method 2: FinanceDataReader
+    try:
         import FinanceDataReader as fdr
-
         df = fdr.DataReader(ticker, start, end)
+        if df is not None and not df.empty:
+            return df
+    except Exception:
+        pass
+
+    # Method 3: yfinance .KS (Render에서 pykrx/FDR 실패 시 사용)
+    import yfinance as yf
+    ks_ticker = ticker + ".KS"
+    session = _make_yf_session(20)
+    tk = yf.Ticker(ks_ticker, session=session)
+    df = tk.history(period="1y", auto_adjust=True)
     return df
 
 
-def _fetch_us(ticker: str, period_days: int, retries: int = 3) -> pd.DataFrame:
+def _fetch_us(ticker: str, period_days: int, retries: int = 2) -> pd.DataFrame:
     import time
 
     import yfinance as yf
 
+    session = _make_yf_session(20)  # 20초 HTTP 타임아웃
     last_err: Exception = RuntimeError("unknown")
     for attempt in range(retries):
         try:
-            tk = yf.Ticker(ticker)
+            tk = yf.Ticker(ticker, session=session)
             df = tk.history(period=f"{period_days}d", auto_adjust=True)
             return df
         except Exception as e:

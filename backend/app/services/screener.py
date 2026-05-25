@@ -53,10 +53,10 @@ def _score_or_none(score: float) -> float | None:
     return score
 
 
-def _safe_score_ticker(ticker: str, market: str) -> dict | None:
+def _safe_score_ticker(ticker: str, market: str, period_days: int = 365) -> dict | None:
     """Score a single ticker; returns None on unrecoverable failure."""
     try:
-        df = get_ohlcv(ticker, market, period_days=365)
+        df = get_ohlcv(ticker, market, period_days=period_days)
     except Exception as e:
         logger.debug("skip %s/%s: price fetch failed: %s", ticker, market, e)
         return None
