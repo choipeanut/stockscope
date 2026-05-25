@@ -11,3 +11,5 @@ numpy>=1.26.0
 SQLAlchemy>=2.0.0
 python-multipart>=0.0.9
 anthropic>=0.40.0
+google-auth>=2.29.0
+python-jose[cryptography]>=3.3.0
