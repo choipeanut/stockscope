@@ -101,7 +101,8 @@ export function NewsPanel({ ticker, market }: Props) {
         color: "#f9fafb",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      {/* 헤더 */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
           📰 뉴스 &amp; 공시 — {ticker}
         </h4>
@@ -119,6 +120,57 @@ export function NewsPanel({ ticker, market }: Props) {
           </button>
         </div>
       </div>
+
+      {/* 감성 점수 요약 바 */}
+      {(() => {
+        const sent = data?.sentiment;
+        if (!sent?.available) return null;
+        const s = sent.sentiment;
+        const color = s === "positive" ? "#22c55e" : s === "negative" ? "#ef4444" : "#6b7280";
+        const bg = s === "positive" ? "#052e16" : s === "negative" ? "#2d0a0a" : "#1a1f2e";
+        const label = s === "positive" ? "📈 긍정적" : s === "negative" ? "📉 부정적" : "➖ 중립";
+        const delta = sent.score_delta ?? 0;
+        const deltaStr = delta > 0 ? `+${delta}점` : delta < 0 ? `${delta}점` : "±0점";
+        const deltaColor = delta > 0 ? "#22c55e" : delta < 0 ? "#ef4444" : "#6b7280";
+        return (
+          <div style={{
+            background: bg, border: `1px solid ${color}55`,
+            borderRadius: 10, padding: "12px 16px", marginBottom: 16,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color }}>
+                Claude 감성 분석 결과: {label}
+              </span>
+              <span style={{
+                fontSize: 15, fontWeight: 800, color: deltaColor,
+                background: `${deltaColor}22`, borderRadius: 6, padding: "3px 12px",
+                border: `1px solid ${deltaColor}44`,
+              }}>
+                {deltaStr} 보정
+              </span>
+            </div>
+            {sent.summary && (
+              <div style={{ fontSize: 12, color: "#d1d5db", marginBottom: 6 }}>{sent.summary}</div>
+            )}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(sent.key_signals ?? []).map((sig, i) => (
+                <span key={i} style={{
+                  fontSize: 11, color, background: `${color}18`,
+                  border: `1px solid ${color}33`, borderRadius: 4, padding: "2px 8px",
+                }}>
+                  {sig}
+                </span>
+              ))}
+              <span style={{
+                fontSize: 11, color: "#6b7280", background: "#1f2937",
+                borderRadius: 4, padding: "2px 8px",
+              }}>
+                신뢰도 {sent.confidence === "high" ? "높음" : sent.confidence === "medium" ? "보통" : "낮음"}
+              </span>
+            </div>
+          </div>
+        );
+      })()}
 
       {error && (
         <div style={{ fontSize: 13, color: "#ef4444", padding: "8px 0" }}>
