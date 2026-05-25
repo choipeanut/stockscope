@@ -92,7 +92,7 @@ def _latest_price(ticker: str, market: str) -> float:
     return float(df["close"].iloc[-1])
 
 
-def buy(ticker: str, market: str, qty: float) -> dict:
+def buy(ticker: str, market: str, qty: float, user_id: int) -> dict:
     if qty <= 0:
         raise TradeError("qty must be positive")
 
@@ -100,15 +100,15 @@ def buy(ticker: str, market: str, qty: float) -> dict:
     price_krw, fx_rate = _to_krw(price_native, market)
     cost = price_krw * qty
 
-    account = repo.get_account()
+    account = repo.get_account(user_id)
     if account["cash"] < cost:
         raise TradeError(
             f"잔고 부족: 필요 {cost:,.0f}원, 보유 {account['cash']:,.0f}원"
         )
 
-    repo.update_cash(account["cash"] - cost)
+    repo.update_cash(user_id, account["cash"] - cost)
 
-    existing = repo.get_holding(ticker, market)
+    existing = repo.get_holding(user_id, ticker, market)
     if existing:
         old_qty = existing["qty"]
         old_avg = existing["avg_price"]
@@ -118,16 +118,16 @@ def buy(ticker: str, market: str, qty: float) -> dict:
         new_qty = qty
         new_avg = price_krw
 
-    repo.upsert_holding(ticker, market, new_qty, new_avg)
-    repo.add_transaction(ticker, market, "BUY", qty, price_krw)
+    repo.upsert_holding(user_id, ticker, market, new_qty, new_avg)
+    repo.add_transaction(user_id, ticker, market, "BUY", qty, price_krw)
 
     result = {
         "ticker": ticker,
         "market": market,
         "side": "BUY",
         "qty": qty,
-        "price": round(price_krw, 0),          # KRW 가격
-        "price_native": round(price_native, 2), # 원본 가격 (USD or KRW)
+        "price": round(price_krw, 0),
+        "price_native": round(price_native, 2),
         "cost": round(cost, 0),
         "avg_price": round(new_avg, 0),
         "new_qty": new_qty,
@@ -141,11 +141,11 @@ def buy(ticker: str, market: str, qty: float) -> dict:
     return result
 
 
-def sell(ticker: str, market: str, qty: float) -> dict:
+def sell(ticker: str, market: str, qty: float, user_id: int) -> dict:
     if qty <= 0:
         raise TradeError("qty must be positive")
 
-    existing = repo.get_holding(ticker, market)
+    existing = repo.get_holding(user_id, ticker, market)
     if not existing:
         raise TradeError(f"{ticker}/{market} 보유 없음")
     if existing["qty"] < qty:
@@ -158,16 +158,16 @@ def sell(ticker: str, market: str, qty: float) -> dict:
     proceeds = price_krw * qty
     realized_pnl = (price_krw - existing["avg_price"]) * qty
 
-    account = repo.get_account()
-    repo.update_cash(account["cash"] + proceeds)
+    account = repo.get_account(user_id)
+    repo.update_cash(user_id, account["cash"] + proceeds)
 
     new_qty = existing["qty"] - qty
     if new_qty < 1e-9:
-        repo.delete_holding(ticker, market)
+        repo.delete_holding(user_id, ticker, market)
     else:
-        repo.upsert_holding(ticker, market, new_qty, existing["avg_price"])
+        repo.upsert_holding(user_id, ticker, market, new_qty, existing["avg_price"])
 
-    repo.add_transaction(ticker, market, "SELL", qty, price_krw)
+    repo.add_transaction(user_id, ticker, market, "SELL", qty, price_krw)
 
     result = {
         "ticker": ticker,
@@ -190,11 +190,11 @@ def sell(ticker: str, market: str, qty: float) -> dict:
     return result
 
 
-def get_portfolio() -> dict:
-    account = repo.get_account()
-    holdings_raw = repo.get_holdings()
+def get_portfolio(user_id: int) -> dict:
+    account = repo.get_account(user_id)
+    holdings_raw = repo.get_holdings(user_id)
 
-    fx_rate = _get_usd_krw()  # 현재 환율 (포트폴리오 평가에 사용)
+    fx_rate = _get_usd_krw()
     holdings = []
     total_value = 0.0
 
@@ -214,8 +214,8 @@ def get_portfolio() -> dict:
             "ticker": h["ticker"],
             "market": h["market"],
             "qty": h["qty"],
-            "avg_price": h["avg_price"],          # KRW
-            "current_price": round(price_krw, 0), # KRW
+            "avg_price": h["avg_price"],
+            "current_price": round(price_krw, 0),
             "position_value": round(position_value, 0),
             "unrealized_pnl": round(unrealized_pnl, 0),
             "pnl_pct": round((price_krw / h["avg_price"] - 1) * 100, 2)

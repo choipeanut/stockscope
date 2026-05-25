@@ -14,6 +14,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 from app.api.analyze import router as analyze_router  # noqa: E402
+from app.api.auth import router as auth_router  # noqa: E402
 from app.api.macro import router as macro_router  # noqa: E402
 from app.api.news import router as news_router  # noqa: E402
 from app.api.portfolio import router as portfolio_router  # noqa: E402
@@ -42,6 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(analyze_router)
 app.include_router(portfolio_router)
 app.include_router(screen_router)

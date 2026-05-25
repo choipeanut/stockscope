@@ -5,6 +5,28 @@ export const api = axios.create({
   timeout: 120_000, // 2분 — Render 무료 플랜 cold start 대응
 });
 
+// JWT 토큰 자동 삽입
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("auth_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// 401 → 로그아웃 (토큰 만료 등)
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem("auth_token");
+      localStorage.removeItem("auth_user");
+      window.location.reload();
+    }
+    return Promise.reject(err);
+  },
+);
+
 export interface OhlcvRow {
   date: string;
   open: number;

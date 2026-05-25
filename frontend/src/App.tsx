@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { GoogleOAuthProvider } from "@react-oauth/google";
 import { fetchAnalysis } from "./api/client";
 import { ScoreCard } from "./components/ScoreCard";
 import { PriceChart } from "./components/PriceChart";
@@ -12,6 +13,10 @@ import { MacroDashboard } from "./components/MacroDashboard";
 import { Watchlist, WatchlistAddButton } from "./components/Watchlist";
 import { NewsPanel } from "./components/NewsPanel";
 import { MetricsPanel } from "./components/MetricsPanel";
+import { LoginPage } from "./components/LoginPage";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5 * 60 * 1000 } },
@@ -124,23 +129,14 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
 
         {data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-            {/* Top row: score + chart */}
             <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
-              {/* Score summary */}
               <ScoreCard data={data} />
-              {/* Price chart */}
               <div style={{ flex: 1, minWidth: 320 }}>
                 <PriceChart ohlcv={data.ohlcv} ticker={data.ticker} />
               </div>
             </div>
 
-            {/* Factor breakdown */}
-            <div
-              style={{
-                background: "#111827", border: "1px solid #374151",
-                borderRadius: 12, padding: 24,
-              }}
-            >
+            <div style={{ background: "#111827", border: "1px solid #374151", borderRadius: 12, padding: 24 }}>
               <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600 }}>
                 팩터 상세 ({data.unavailable.length > 0
                   ? `${6 - data.unavailable.length}/6 팩터 사용 가능`
@@ -149,7 +145,6 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
               <FactorBreakdown data={data} />
             </div>
 
-            {/* Key required warning */}
             {data.key_required && data.key_required.length > 0 && (
               <div style={{
                 background: "#1c1917", border: "1px solid #92400e",
@@ -160,28 +155,19 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
               </div>
             )}
 
-            {/* Macro regime */}
             {data.macro_detail?.regime && (
-              <div style={{
-                background: "#111827", border: "1px solid #374151",
-                borderRadius: 12, padding: "16px 24px",
-              }}>
+              <div style={{ background: "#111827", border: "1px solid #374151", borderRadius: 12, padding: "16px 24px" }}>
                 <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>거시 국면</div>
-                    <div style={{ fontSize: 22, fontWeight: 700 }}>
-                      {data.macro_detail.regime}
-                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 700 }}>{data.macro_detail.regime}</div>
                   </div>
                   {data.macro_detail.sector_hints?.length > 0 && (
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>섹터 힌트</div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         {data.macro_detail.sector_hints.map((h, i) => (
-                          <span key={i} style={{
-                            background: "#1f2937", borderRadius: 6,
-                            padding: "4px 10px", fontSize: 12, color: "#d1d5db",
-                          }}>
+                          <span key={i} style={{ background: "#1f2937", borderRadius: 6, padding: "4px 10px", fontSize: 12, color: "#d1d5db" }}>
                             {h}
                           </span>
                         ))}
@@ -192,23 +178,15 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
               </div>
             )}
 
-            {/* Scenarios */}
             {data.scenarios && data.scenarios.length > 0 && (
-              <div style={{
-                background: "#111827", border: "1px solid #374151",
-                borderRadius: 12, padding: 24,
-              }}>
+              <div style={{ background: "#111827", border: "1px solid #374151", borderRadius: 12, padding: 24 }}>
                 <ScenarioPanel scenarios={data.scenarios} />
               </div>
             )}
 
-            {/* Quantitative metrics */}
             <MetricsPanel data={data} />
-
-            {/* News & Disclosures */}
             <NewsPanel ticker={data.ticker} market={data.market} />
 
-            {/* Trade form + watchlist add */}
             <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
               <div style={{ flex: 1, minWidth: 280 }}>
                 <TradeForm
@@ -222,7 +200,6 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
               </div>
             </div>
 
-            {/* Disclaimer */}
             <div style={{
               padding: "10px 16px", background: "#111827",
               border: "1px solid #1f2937", borderRadius: 8,
@@ -245,6 +222,7 @@ const TAB_STYLE = (active: boolean) => ({
 });
 
 function AppShell() {
+  const { user, logout } = useAuth();
   const [tab, setTab] = useState<"analyze" | "screen" | "macro" | "portfolio">("analyze");
   const [drillTicker, setDrillTicker] = useState("");
   const [drillMarket, setDrillMarket] = useState<"KOSDAQ" | "NASDAQ">("NASDAQ");
@@ -267,7 +245,30 @@ function AppShell() {
         <button style={TAB_STYLE(tab === "screen")} onClick={() => setTab("screen")}>스크리너</button>
         <button style={TAB_STYLE(tab === "macro")} onClick={() => setTab("macro")}>매크로</button>
         <button style={TAB_STYLE(tab === "portfolio")} onClick={() => setTab("portfolio")}>포트폴리오</button>
+
+        {/* 유저 정보 + 로그아웃 */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          {user?.picture && (
+            <img
+              src={user.picture}
+              alt={user.name}
+              style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover" }}
+            />
+          )}
+          <span style={{ fontSize: 13, color: "#9ca3af" }}>{user?.name}</span>
+          <button
+            onClick={logout}
+            style={{
+              background: "transparent", border: "1px solid #374151",
+              borderRadius: 6, color: "#6b7280", padding: "4px 10px",
+              fontSize: 12, cursor: "pointer",
+            }}
+          >
+            로그아웃
+          </button>
+        </div>
       </div>
+
       <div style={{ padding: "24px 16px" }}>
         {tab === "analyze" && (
           <AnalysisView initialTicker={drillTicker} initialMarket={drillMarket} />
@@ -293,10 +294,29 @@ function AppShell() {
   );
 }
 
+function AppRouter() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    // 세션 복원 중 — 빈 화면 (깜빡임 방지)
+    return <div style={{ minHeight: "100vh", background: "#0f172a" }} />;
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  return <AppShell />;
+}
+
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AppShell />
-    </QueryClientProvider>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <AppRouter />
+        </AuthProvider>
+      </QueryClientProvider>
+    </GoogleOAuthProvider>
   );
 }
