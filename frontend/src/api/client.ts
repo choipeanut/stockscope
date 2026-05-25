@@ -91,6 +91,30 @@ export interface ScreenResponse {
   results: ScreenRow[];
 }
 
+export interface NewsItem {
+  title: string;
+  url: string;
+  source: string;
+  published: string;
+  summary: string;
+  type: "news" | "disclosure";
+}
+
+export interface NewsResponse {
+  ticker: string;
+  market: string;
+  news: NewsItem[];
+  disclosures: NewsItem[];
+  as_of: string;
+}
+
+export async function fetchNews(ticker: string, market: string, limit = 10): Promise<NewsResponse> {
+  const { data } = await api.get<NewsResponse>("/news", {
+    params: { ticker, market, limit },
+  });
+  return data;
+}
+
 export async function fetchScreen(
   market?: string,
   minScore?: number,

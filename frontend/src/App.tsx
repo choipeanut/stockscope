@@ -10,6 +10,7 @@ import { Portfolio } from "./components/Portfolio";
 import { ScreenTable } from "./components/ScreenTable";
 import { MacroDashboard } from "./components/MacroDashboard";
 import { Watchlist, WatchlistAddButton } from "./components/Watchlist";
+import { NewsPanel } from "./components/NewsPanel";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5 * 60 * 1000 } },
@@ -199,6 +200,9 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
                 <ScenarioPanel scenarios={data.scenarios} />
               </div>
             )}
+
+            {/* News & Disclosures */}
+            <NewsPanel ticker={data.ticker} market={data.market} />
 
             {/* Trade form + watchlist add */}
             <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>

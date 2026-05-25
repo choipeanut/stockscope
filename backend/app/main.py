@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 from app.api.analyze import router as analyze_router  # noqa: E402
 from app.api.macro import router as macro_router  # noqa: E402
+from app.api.news import router as news_router  # noqa: E402
 from app.api.portfolio import router as portfolio_router  # noqa: E402
 from app.api.screen import router as screen_router  # noqa: E402
 
@@ -39,6 +40,7 @@ app.include_router(analyze_router)
 app.include_router(portfolio_router)
 app.include_router(screen_router)
 app.include_router(macro_router)
+app.include_router(news_router)
 
 
 @app.get("/health")
