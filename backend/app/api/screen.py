@@ -1,12 +1,16 @@
 """GET /screen — batch screener endpoint.
 
-Design: synchronous with hard wall-clock timeout via concurrent.futures.wait().
-socket.setdefaulttimeout() prevents yfinance from hanging forever.
-Results cached in-process for 30 minutes.
+Design: background thread로 전체 종목 스코어링, 결과 30분 캐시.
+- 첫 요청: 백그라운드 시작 → 즉시 {status:"running"} 반환
+- 이후 요청: 캐시에서 즉시 반환 (30분 유효)
+- 백그라운드는 5분 wall-timeout (동기 HTTP와 무관)
+
+yfinance 20초 HTTP 타임아웃 + KOSDAQ .KS 폴백으로 모든 종목 완료 가능.
 """
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait as cf_wait
 from datetime import datetime, timezone
@@ -14,83 +18,36 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Query
 
 from app.collectors.universe import get_universe
-from app.services.screener import _safe_score_ticker  # reuse per-ticker logic
+from app.services.screener import _safe_score_ticker
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_CACHE_TTL = 1800  # 30분
-_WALL_TIMEOUT = 55  # 초 — wall-clock 최대 대기 (Render HTTP 제한 고려)
+_CACHE_TTL = 1800          # 30분 캐시
+_WALL_TIMEOUT = 300        # 백그라운드 최대 5분 (모든 종목 커버)
+_MAX_WORKERS = 8
 
 _last_result: dict | None = None
-_last_run_at: float = 0.0  # time.time()
+_last_run_at: float = 0.0
 _running = False
+_bg_thread: threading.Thread | None = None
 
 
-@router.get("/screen")
-def screen(
-    market: str = Query("", description="Filter: KOSDAQ | NASDAQ | (empty = both)"),
-    min_score: float = Query(0.0, ge=0.0, le=100.0),
-    limit: int = Query(50, ge=1, le=200),
-    refresh: bool = Query(False, description="강제 새로고침"),
-) -> dict:
+def _run_background(market_filter: str | None) -> None:
     global _last_result, _last_run_at, _running
+    logger.info("[screener] background start (market=%s)", market_filter)
 
-    market_filter = market.upper() if market else None
-
-    # 캐시 유효하면 즉시 반환
-    cache_valid = (
-        _last_result is not None
-        and not refresh
-        and (time.time() - _last_run_at) < _CACHE_TTL
-    )
-    if cache_valid:
-        return _build_response(_last_result, min_score, limit, stale=False)
-
-    # 이미 동기 실행 중이면 이전 캐시 반환 (없으면 빈 결과)
-    if _running:
-        if _last_result:
-            return _build_response(_last_result, min_score, limit, stale=True)
-        return {"status": "running", "results": [], "total": 0, "stale": True, "error": None}
-
-    _running = True
-    logger.info("[screener] starting synchronous run (market=%s)", market_filter)
-
-    try:
-        results = _run_sync(market_filter)
-        _last_result = {"results": results, "market": market_filter}
-        _last_run_at = time.time()
-        logger.info("[screener] done: %d results", len(results))
-    except Exception as e:
-        logger.exception("[screener] unexpected error: %s", e)
-        results = []
-    finally:
-        _running = False
-
-    if _last_result:
-        return _build_response(_last_result, min_score, limit, stale=False)
-    return {"status": "ok", "results": [], "total": 0, "stale": False, "error": "분석 실패 — 잠시 후 다시 시도하세요"}
-
-
-def _run_sync(market_filter: str | None) -> list[dict]:
-    """wall-clock 제한 안에서 종목 스코어링.
-
-    소켓 타임아웃을 쓰지 않음 — Render cold-start에서 yfinance가 12s를 초과할 수 있음.
-    대신 cf_wait(timeout) 로 wall-clock 한도를 지키고,
-    pool.shutdown(wait=False) 로 미완료 스레드를 블록 없이 해제.
-    """
     tickers = get_universe(market_filter)
     logger.info("[screener] universe: %d tickers", len(tickers))
 
     results: list[dict] = []
-    pool = ThreadPoolExecutor(max_workers=8)
+    pool = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
     try:
         future_map = {
-            # 스크리너는 90일치 — 데이터 적어서 yfinance 응답 빠름
+            # 90일치 OHLCV — 데이터 적어 yfinance 응답 빠름
             pool.submit(_safe_score_ticker, item["ticker"], item["market"], 90): item
             for item in tickers
         }
-        # wall-clock 타임아웃: 완료된 것만 수집
         done, not_done = cf_wait(future_map.keys(), timeout=_WALL_TIMEOUT)
 
         if not_done:
@@ -113,17 +70,78 @@ def _run_sync(market_filter: str | None) -> list[dict]:
             result["name"] = item.get("name", "")
             results.append(result)
     finally:
-        # 미완료 스레드를 기다리지 않고 즉시 응답 반환
         pool.shutdown(wait=False)
 
     results.sort(key=lambda r: r.get("composite") or 0, reverse=True)
-    return results
+
+    _last_result = {"results": results, "market": market_filter}
+    _last_run_at = time.time()
+    _running = False
+    logger.info("[screener] background done: %d results", len(results))
+
+
+@router.get("/screen")
+def screen(
+    market: str = Query("", description="Filter: KOSDAQ | NASDAQ | (empty = both)"),
+    min_score: float = Query(0.0, ge=0.0, le=100.0),
+    limit: int = Query(50, ge=1, le=200),
+    refresh: bool = Query(False, description="강제 새로고침"),
+) -> dict:
+    global _last_result, _last_run_at, _running, _bg_thread
+
+    market_filter = market.upper() if market else None
+
+    # 캐시 유효하면 즉시 반환
+    cache_valid = (
+        _last_result is not None
+        and not refresh
+        and (time.time() - _last_run_at) < _CACHE_TTL
+    )
+    if cache_valid:
+        return _build_response(_last_result, min_score, limit, stale=False)
+
+    # 백그라운드가 이미 실행 중이면 stale 결과 반환
+    if _running:
+        if _last_result:
+            return _build_response(_last_result, min_score, limit, stale=True)
+        return {
+            "status": "running",
+            "results": [],
+            "total": 0,
+            "stale": True,
+            "error": None,
+            "as_of": None,
+        }
+
+    # 백그라운드 스코어링 시작
+    _running = True
+    _bg_thread = threading.Thread(
+        target=_run_background,
+        args=(market_filter,),
+        daemon=True,
+        name="screener-bg",
+    )
+    _bg_thread.start()
+    logger.info("[screener] background thread launched")
+
+    # 즉시 stale 결과 반환 (없으면 running 상태)
+    if _last_result:
+        return _build_response(_last_result, min_score, limit, stale=True)
+    return {
+        "status": "running",
+        "message": "스코어링 시작됨 — 첫 로드는 1~3분 소요. 잠시 후 새로고침하세요.",
+        "results": [],
+        "total": 0,
+        "stale": True,
+        "error": None,
+        "as_of": None,
+    }
 
 
 @router.get("/screen/debug-score")
 def debug_score(ticker: str = "AAPL", market: str = "NASDAQ") -> dict:
     """단일 종목 스코어링 디버그 — 각 단계별 성공/실패 반환."""
-    import traceback
+    from datetime import datetime, timezone
 
     from app.collectors.flows import get_flows
     from app.collectors.fundamentals import get_fundamentals
@@ -142,7 +160,7 @@ def debug_score(ticker: str = "AAPL", market: str = "NASDAQ") -> dict:
     steps: dict = {}
 
     try:
-        df = get_ohlcv(ticker, market, period_days=365)
+        df = get_ohlcv(ticker, market, period_days=90)
         steps["ohlcv"] = f"ok ({len(df)} rows, last={df['close'].iloc[-1]:.2f})"
     except Exception as e:
         steps["ohlcv"] = f"FAIL: {e}"
@@ -150,7 +168,7 @@ def debug_score(ticker: str = "AAPL", market: str = "NASDAQ") -> dict:
 
     index_ticker = "^IXIC" if market == "NASDAQ" else "^KQ11"
     try:
-        index_df = get_ohlcv(index_ticker, market, period_days=365)
+        index_df = get_ohlcv(index_ticker, market, period_days=90)
         steps["index"] = "ok"
     except Exception as e:
         index_df = None
@@ -158,61 +176,22 @@ def debug_score(ticker: str = "AAPL", market: str = "NASDAQ") -> dict:
 
     factor_scores: dict = {}
 
-    try:
-        m = compute_momentum(df, index_df)
-        factor_scores["momentum"] = round(m.score, 2)
-        steps["momentum"] = "ok"
-    except Exception as e:
-        factor_scores["momentum"] = None
-        steps["momentum"] = f"FAIL: {e}"
+    for name, fn_args in [
+        ("momentum", lambda: compute_momentum(df, index_df)),
+        ("valuation", lambda: compute_valuation(get_valuation(ticker, market))),
+        ("fundamental", lambda: compute_fundamental(get_fundamentals(ticker, market))),
+        ("supply_demand", lambda: compute_supply_demand(get_flows(ticker, market))),
+        ("macro", lambda: compute_macro(get_macro(ticker, market))),
+        ("risk", lambda: compute_risk(get_risk(ticker, market, price_df=df, index_df=index_df), fund_data={})),
+    ]:
+        try:
+            r = fn_args()
+            factor_scores[name] = round(r.score, 2)
+            steps[name] = "ok"
+        except Exception as e:
+            factor_scores[name] = None
+            steps[name] = f"FAIL: {e}"
 
-    try:
-        val_data = get_valuation(ticker, market)
-        val_result = compute_valuation(val_data)
-        factor_scores["valuation"] = round(val_result.score, 2)
-        steps["valuation"] = f"ok (per={val_data.get('per')}, pbr={val_data.get('pbr')})"
-    except Exception as e:
-        factor_scores["valuation"] = None
-        steps["valuation"] = f"FAIL: {e}"
-
-    try:
-        fund_data = get_fundamentals(ticker, market)
-        fund_result = compute_fundamental(fund_data)
-        factor_scores["fundamental"] = round(fund_result.score, 2)
-        steps["fundamental"] = f"ok (revenue_growth={fund_data.get('revenue_growth')})"
-    except Exception as e:
-        factor_scores["fundamental"] = None
-        steps["fundamental"] = f"FAIL: {e}"
-
-    try:
-        flow_data = get_flows(ticker, market)
-        sd_result = compute_supply_demand(flow_data)
-        factor_scores["supply_demand"] = round(sd_result.score, 2)
-        steps["supply_demand"] = "ok"
-    except Exception as e:
-        factor_scores["supply_demand"] = None
-        steps["supply_demand"] = f"FAIL: {e}"
-
-    try:
-        macro_data = get_macro(ticker, market)
-        macro_result = compute_macro(macro_data)
-        factor_scores["macro"] = round(macro_result.score, 2)
-        steps["macro"] = "ok"
-    except Exception as e:
-        factor_scores["macro"] = None
-        steps["macro"] = f"FAIL: {e}"
-
-    try:
-        risk_data = get_risk(ticker, market, price_df=df, index_df=index_df)
-        fund_d = {} if factor_scores.get("fundamental") is None else {"available": True}
-        risk_result = compute_risk(risk_data, fund_data=fund_d)
-        factor_scores["risk"] = round(risk_result.score, 2)
-        steps["risk"] = "ok"
-    except Exception as e:
-        factor_scores["risk"] = None
-        steps["risk"] = f"FAIL: {e}"
-
-    from datetime import datetime, timezone
     composite = compute_composite(factor_scores, as_of=datetime.now(timezone.utc).isoformat())
     steps["composite"] = composite.composite
 

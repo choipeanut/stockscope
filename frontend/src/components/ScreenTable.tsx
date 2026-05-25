@@ -59,6 +59,9 @@ export function ScreenTable({ onDrillDown }: Props) {
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     enabled: triggered,
+    // 백그라운드 스코어링 중이면 15초마다 자동 폴링
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 15_000 : false,
   });
 
   function toggleSort(key: SortKey) {
@@ -180,20 +183,21 @@ export function ScreenTable({ onDrillDown }: Props) {
         </div>
       )}
 
-      {isFetching && (
+      {/* 백그라운드 스코어링 진행 중 */}
+      {(data?.status === "running" || (isFetching && rows.length === 0)) && (
         <div style={{ textAlign: "center", padding: "32px 0" }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>🔍</div>
           <div style={{ fontSize: 15, fontWeight: 600, color: "#f9fafb", marginBottom: 6 }}>
-            종목 분석 중...
+            백그라운드에서 종목 스코어링 중...
           </div>
           <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-            실시간으로 점수를 계산하고 있습니다
+            처음 실행 시 1~3분 소요됩니다. 자동으로 새로고침합니다.
           </div>
           <div style={{
             display: "inline-block", background: "#1f2937",
             borderRadius: 8, padding: "8px 20px", fontSize: 12, color: "#9ca3af",
           }}>
-            보통 30~60초 소요
+            15초마다 자동 확인 중...
           </div>
         </div>
       )}
