@@ -1,0 +1,120 @@
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api/client";
+
+interface Holding {
+  ticker: string;
+  market: string;
+  qty: number;
+  avg_price: number;
+  current_price: number;
+  position_value: number;
+  unrealized_pnl: number;
+  pnl_pct: number;
+}
+
+interface PortfolioData {
+  cash: number;
+  base_currency: string;
+  holdings: Holding[];
+  totals: { positions_value: number; total_assets: number };
+}
+
+function pnlColor(v: number) {
+  return v > 0 ? "#22c55e" : v < 0 ? "#ef4444" : "#9ca3af";
+}
+
+export function Portfolio() {
+  const { data, isFetching, refetch } = useQuery<PortfolioData>({
+    queryKey: ["portfolio"],
+    queryFn: async () => (await api.get("/portfolio")).data,
+    refetchOnWindowFocus: false,
+  });
+
+  return (
+    <div
+      style={{
+        background: "#111827",
+        border: "1px solid #374151",
+        borderRadius: 12,
+        padding: 24,
+        color: "#f9fafb",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>포트폴리오</h3>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          style={{
+            background: "#1f2937", border: "1px solid #374151", borderRadius: 6,
+            color: "#9ca3af", padding: "4px 12px", fontSize: 12, cursor: "pointer",
+          }}
+        >
+          {isFetching ? "갱신 중..." : "새로고침"}
+        </button>
+      </div>
+
+      {data && (
+        <>
+          {/* Summary */}
+          <div
+            style={{
+              display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 12, marginBottom: 20,
+            }}
+          >
+            {[
+              { label: "가용 현금", value: data.cash.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
+              { label: "보유 자산", value: data.totals.positions_value.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
+              { label: "총 자산", value: data.totals.total_assets.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
+            ].map((item) => (
+              <div key={item.label} style={{ background: "#1f2937", borderRadius: 8, padding: "10px 14px" }}>
+                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>{item.label}</div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Holdings table */}
+          {data.holdings.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#6b7280", padding: "24px 0", fontSize: 14 }}>
+              보유 종목 없음 — 위 분석 화면에서 매수해 보세요
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #374151" }}>
+                    {["종목", "시장", "수량", "평균단가", "현재가", "평가금액", "손익", "수익률"].map((h) => (
+                      <th key={h} style={{ padding: "6px 8px", textAlign: "right", color: "#6b7280", fontWeight: 500, whiteSpace: "nowrap" }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.holdings.map((h) => (
+                    <tr key={`${h.ticker}-${h.market}`} style={{ borderBottom: "1px solid #1f2937" }}>
+                      <td style={{ padding: "8px 8px", fontWeight: 600 }}>{h.ticker}</td>
+                      <td style={{ padding: "8px 8px", color: "#9ca3af", textAlign: "right" }}>{h.market}</td>
+                      <td style={{ padding: "8px 8px", textAlign: "right" }}>{h.qty}</td>
+                      <td style={{ padding: "8px 8px", textAlign: "right" }}>{h.avg_price.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                      <td style={{ padding: "8px 8px", textAlign: "right" }}>{h.current_price.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                      <td style={{ padding: "8px 8px", textAlign: "right" }}>{h.position_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                      <td style={{ padding: "8px 8px", textAlign: "right", color: pnlColor(h.unrealized_pnl) }}>
+                        {h.unrealized_pnl >= 0 ? "+" : ""}{h.unrealized_pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </td>
+                      <td style={{ padding: "8px 8px", textAlign: "right", color: pnlColor(h.pnl_pct) }}>
+                        {h.pnl_pct >= 0 ? "+" : ""}{h.pnl_pct.toFixed(2)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

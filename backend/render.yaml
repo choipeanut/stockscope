@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: stockscope-api
+    runtime: python
+    region: singapore        # 한국과 가장 가까운 리전
+    plan: free
+    buildCommand: pip install -e .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DART_API_KEY
+        sync: false           # Render 대시보드에서 직접 입력
+      - key: FRED_API_KEY
+        sync: false
+      - key: ECOS_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false           # 예: https://your-app.vercel.app
+      - key: PYTHON_VERSION
+        value: 3.11.0
