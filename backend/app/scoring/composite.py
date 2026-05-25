@@ -1,11 +1,15 @@
 """Composite scorer.
 
-M1: uses only price-computable factors (momentum + price-derived risk partial).
-Other factors are explicitly marked unavailable — never zero-filled.
-
 Full weights (ANALYSIS_SPEC):
   fundamental 0.30 | valuation 0.20 | supply_demand 0.15
   momentum    0.15 | macro     0.10 | risk         0.10
+
+Data-coverage confidence penalty:
+  핵심 팩터(fundamental+valuation)가 없을수록 composite에 할인 적용.
+  신뢰도 = 0.55 + 0.45 * (가용_팩터_가중치 합계)
+  - 6/6 팩터 (weight=1.00) → 신뢰도 1.00 → 패널티 없음
+  - 4/6 팩터 (weight=0.55) → 신뢰도 0.80 → 20% 감점
+  - 모멘텀+매크로+리스크만 (weight=0.35) → 신뢰도 0.71 → 29% 감점
 """
 from __future__ import annotations
 
@@ -42,7 +46,8 @@ def compute_composite(
     """
     Compute weighted composite from factor_scores dict.
     Keys: fundamental, valuation, supply_demand, momentum, macro, risk.
-    Value None means unavailable — weight is dropped and remainder renormalized.
+    Value None means unavailable — weight is dropped, remainder renormalized,
+    then a data-coverage confidence multiplier is applied.
     """
     available: dict[str, float] = {}
     unavailable: list[str] = []
@@ -66,8 +71,20 @@ def compute_composite(
             details=details or {},
         )
 
-    total_w = sum(FULL_WEIGHTS[f] for f in available)
+    # 가용 팩터 가중치 합계 (0.0~1.0)
+    available_weight = sum(FULL_WEIGHTS[f] for f in available)
+
+    # 가중 평균 (가용 팩터 내에서 정규화)
+    total_w = available_weight
     composite = sum(FULL_WEIGHTS[f] / total_w * v for f, v in available.items())
+
+    # 데이터 신뢰도 패널티:
+    # 팩터 가중치 커버리지가 낮을수록 점수 할인
+    # confidence = 0.55 + 0.45 * available_weight
+    #   - weight=1.00 (완전) → confidence=1.00 (패널티 없음)
+    #   - weight=0.35 (모멘+매크로+리스크만) → confidence=0.71 (29% 할인)
+    confidence = 0.55 + 0.45 * available_weight
+    composite = composite * confidence
 
     return CompositeResult(
         composite=round(composite, 2),

@@ -119,8 +119,8 @@ export function MetricsPanel({ data }: Props) {
           />
         )}
         {!hasVal && (
-          <div style={{ fontSize: 13, color: "#6b7280", alignSelf: "center" }}>
-            yfinance에서 데이터를 가져오는 중이거나 일시적으로 불가합니다.
+          <div style={{ fontSize: 13, color: "#f59e0b", alignSelf: "center", padding: "8px 12px", background: "#1c1917", borderRadius: 6, border: "1px solid #92400e" }}>
+            ⚠ PER/PBR 데이터를 가져오지 못했습니다. 점수 신뢰도가 낮습니다.
           </div>
         )}
       </Section>

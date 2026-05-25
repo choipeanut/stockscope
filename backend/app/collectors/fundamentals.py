@@ -103,64 +103,100 @@ def _get_kr_fundamentals(ticker: str) -> dict:
     return result
 
 
-def _get_us_fundamentals(ticker: str) -> dict:
+def _get_stmt_fundamentals(ticker: str) -> dict:
+    """재무제표(income_stmt/balance_sheet/cashflow)로 펀더멘털 계산.
+    US 주식과 .KS 한국 주식 모두 동일 구조 사용."""
+    import math
+    import yfinance as yf
+
     result: dict = {
         "revenue_growth": None, "eps_growth": None,
         "op_margin": None, "roe": None, "roa": None,
         "debt_ratio": None, "interest_coverage": None,
         "operating_cf": None, "fcf": None,
         "dividend_payout": None, "buyback": None,
-        "source": "yfinance", "available": True,
+        "source": "yfinance_stmt", "available": False,
     }
+
+    def safe(v):
+        if v is None:
+            return None
+        try:
+            f = float(v)
+            return None if (math.isnan(f) or math.isinf(f)) else f
+        except Exception:
+            return None
+
+    def row(df, *names):
+        if df is None or df.empty:
+            return None
+        for n in names:
+            if n in df.index:
+                v = df.loc[n].iloc[0]
+                return safe(v)
+        return None
+
+    def row_prev(df, *names):
+        if df is None or df.empty or df.shape[1] < 2:
+            return None
+        for n in names:
+            if n in df.index:
+                v = df.loc[n].iloc[1]
+                return safe(v)
+        return None
+
     try:
-        import yfinance as yf
         tk = yf.Ticker(ticker)
-        info = tk.info
+        income = tk.income_stmt
+        balance = tk.balance_sheet
+        cashflow = tk.cashflow
 
-        result["op_margin"] = _safe(info.get("operatingMargins", 0) * 100
-                                    if info.get("operatingMargins") else None)
-        result["roe"] = _safe(info.get("returnOnEquity", 0) * 100
-                              if info.get("returnOnEquity") else None)
-        result["roa"] = _safe(info.get("returnOnAssets", 0) * 100
-                              if info.get("returnOnAssets") else None)
+        revenue = row(income, "Total Revenue", "Operating Revenue")
+        prev_revenue = row_prev(income, "Total Revenue", "Operating Revenue")
+        op_income = row(income, "Operating Income", "Total Operating Income As Reported")
+        net_income = row(income, "Net Income", "Net Income Common Stockholders",
+                         "Net Income From Continuing Operation Net Minority Interest")
+        total_equity = row(balance, "Stockholders Equity", "Common Stock Equity",
+                           "Total Equity Gross Minority Interest")
+        total_assets = row(balance, "Total Assets")
+        total_debt = row(balance, "Total Debt", "Total Liabilities Net Minority Interest")
+        ocf = row(cashflow, "Operating Cash Flow", "Cash Flow From Continuing Operating Activities")
+        capex = row(cashflow, "Capital Expenditure", "Purchase Of PPE")
 
-        de = _safe(info.get("debtToEquity"))
-        result["debt_ratio"] = de  # already a ratio
+        if revenue and prev_revenue and prev_revenue != 0:
+            result["revenue_growth"] = round((revenue - prev_revenue) / abs(prev_revenue) * 100, 1)
 
-        # Revenue growth from financials
-        try:
-            fin = tk.financials
-            if fin is not None and not fin.empty and fin.shape[1] >= 2:
-                rev_row = fin.loc["Total Revenue"] if "Total Revenue" in fin.index else None
-                if rev_row is not None:
-                    r0, r1 = float(rev_row.iloc[0]), float(rev_row.iloc[1])
-                    if r1 and r1 != 0:
-                        result["revenue_growth"] = (r0 - r1) / abs(r1) * 100
-        except Exception:
-            pass
+        if op_income and revenue and revenue != 0:
+            result["op_margin"] = round(op_income / revenue * 100, 1)
 
-        # Cash flow
-        try:
-            cf = tk.cashflow
-            if cf is not None and not cf.empty:
-                ocf_row = (cf.loc["Operating Cash Flow"]
-                           if "Operating Cash Flow" in cf.index else None)
-                capex_row = (cf.loc["Capital Expenditure"]
-                             if "Capital Expenditure" in cf.index else None)
-                if ocf_row is not None:
-                    result["operating_cf"] = float(ocf_row.iloc[0])
-                if ocf_row is not None and capex_row is not None:
-                    result["fcf"] = float(ocf_row.iloc[0]) + float(capex_row.iloc[0])
-        except Exception:
-            pass
+        if net_income and total_equity and total_equity != 0:
+            result["roe"] = round(net_income / total_equity * 100, 1)
 
-        pr = _safe(info.get("payoutRatio"))
-        result["dividend_payout"] = pr * 100 if pr else None
+        if net_income and total_assets and total_assets != 0:
+            result["roa"] = round(net_income / total_assets * 100, 1)
+
+        if total_debt and total_equity and total_equity != 0:
+            result["debt_ratio"] = round(total_debt / total_equity * 100, 1)
+
+        if ocf is not None:
+            result["operating_cf"] = ocf
+            if capex is not None:
+                result["fcf"] = ocf + capex  # capex는 음수로 기록됨
+
+        result["available"] = any(
+            result[k] is not None
+            for k in ["revenue_growth", "op_margin", "roe", "roa"]
+        )
 
     except Exception as e:
         result["available"] = False
         result["error"] = str(e)
+
     return result
+
+
+def _get_us_fundamentals(ticker: str) -> dict:
+    return _get_stmt_fundamentals(ticker)
 
 
 def get_fundamentals(ticker: str, market: str) -> dict:
@@ -169,7 +205,19 @@ def get_fundamentals(ticker: str, market: str) -> dict:
     if cached:
         return cached[0]
 
-    data = _get_kr_fundamentals(ticker) if market == "KOSDAQ" else _get_us_fundamentals(ticker)
+    if market == "KOSDAQ":
+        # DART API 있으면 사용, 없으면 yfinance .KS 폴백
+        dart_key = __import__("os").environ.get("DART_API_KEY")
+        if dart_key:
+            data = _get_kr_fundamentals(ticker)
+            if not data.get("available"):
+                data = _get_stmt_fundamentals(ticker + ".KS")
+        else:
+            data = _get_stmt_fundamentals(ticker + ".KS")
+    else:
+        data = _get_stmt_fundamentals(ticker)
+
     data["as_of"] = datetime.now(timezone.utc).isoformat()
-    cache.set(key, data, _TTL)
+    if data.get("available"):
+        cache.set(key, data, _TTL)
     return data

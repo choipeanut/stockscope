@@ -38,8 +38,20 @@ def _row(df, *names):
 
 
 def _get_kr_valuation(ticker: str) -> dict:
-    from pykrx import stock as pykrx_stock
+    """한국 주식 밸류에이션: pykrx 우선, 실패 시 yfinance .KS 폴백."""
+    # 1) pykrx 시도
+    pykrx_result = _try_pykrx_valuation(ticker)
+    if pykrx_result.get("available"):
+        return pykrx_result
 
+    # 2) yfinance .KS 폴백 (재무제표 기반 계산)
+    ks_ticker = ticker + ".KS"
+    result = _get_us_valuation(ks_ticker)
+    result["source"] = "yfinance_ks"
+    return result
+
+
+def _try_pykrx_valuation(ticker: str) -> dict:
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     result: dict = {
         "per": None, "pbr": None, "dividend_yield": None,
@@ -48,26 +60,35 @@ def _get_kr_valuation(ticker: str) -> dict:
         "source": "pykrx", "available": True,
     }
     try:
+        from pykrx import stock as pykrx_stock
         df = pykrx_stock.get_market_fundamental(today, today, ticker)
-        if df is not None and not df.empty:
-            row = df.iloc[-1]
-            result["per"] = _safe(row.get("PER") or row.get("per"))
-            result["pbr"] = _safe(row.get("PBR") or row.get("pbr"))
-            result["eps"] = _safe(row.get("EPS") or row.get("eps"))
-            result["bps"] = _safe(row.get("BPS") or row.get("bps"))
-            result["dividend_yield"] = _safe(row.get("DIV") or row.get("div"))
+        if df is None or df.empty:
+            result["available"] = False
+            return result
 
-        start_5y = (datetime.now(timezone.utc).replace(
-            year=datetime.now(timezone.utc).year - 5)
-        ).strftime("%Y%m%d")
-        df5 = pykrx_stock.get_market_fundamental(start_5y, today, ticker)
-        if df5 is not None and not df5.empty and result["per"] is not None:
-            per_col = "PER" if "PER" in df5.columns else "per"
-            per_s = df5[per_col].replace(0, None).dropna()
-            if len(per_s) > 10:
-                result["per_5y_pct"] = round(
-                    (per_s < result["per"]).mean() * 100, 1
-                )
+        row = df.iloc[-1]
+        result["per"] = _safe(row.get("PER") or row.get("per"))
+        result["pbr"] = _safe(row.get("PBR") or row.get("pbr"))
+        result["eps"] = _safe(row.get("EPS") or row.get("eps"))
+        result["bps"] = _safe(row.get("BPS") or row.get("bps"))
+        result["dividend_yield"] = _safe(row.get("DIV") or row.get("div"))
+
+        # 5년 PER 분위
+        try:
+            start_5y = (datetime.now(timezone.utc).replace(
+                year=datetime.now(timezone.utc).year - 5)
+            ).strftime("%Y%m%d")
+            df5 = pykrx_stock.get_market_fundamental(start_5y, today, ticker)
+            if df5 is not None and not df5.empty and result["per"] is not None:
+                per_col = "PER" if "PER" in df5.columns else "per"
+                per_s = df5[per_col].replace(0, None).dropna()
+                if len(per_s) > 10:
+                    result["per_5y_pct"] = round(
+                        (per_s < result["per"]).mean() * 100, 1
+                    )
+        except Exception:
+            pass
+
     except Exception:
         result["available"] = False
 
