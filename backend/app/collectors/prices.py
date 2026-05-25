@@ -79,12 +79,25 @@ def _fetch_kr(ticker: str, start: str, end: str) -> pd.DataFrame:
     return df
 
 
-def _fetch_us(ticker: str, period_days: int) -> pd.DataFrame:
+def _fetch_us(ticker: str, period_days: int, retries: int = 3) -> pd.DataFrame:
+    import time
+
     import yfinance as yf
 
-    tk = yf.Ticker(ticker)
-    df = tk.history(period=f"{period_days}d", auto_adjust=True)
-    return df
+    last_err: Exception = RuntimeError("unknown")
+    for attempt in range(retries):
+        try:
+            tk = yf.Ticker(ticker)
+            df = tk.history(period=f"{period_days}d", auto_adjust=True)
+            return df
+        except Exception as e:
+            last_err = e
+            # Rate limit — back off before retry
+            if "RateLimit" in type(e).__name__ or "429" in str(e):
+                time.sleep(5 * (attempt + 1))
+            else:
+                raise
+    raise last_err
 
 
 def get_ohlcv(ticker: str, market: Market, period_days: int = 365) -> pd.DataFrame:
