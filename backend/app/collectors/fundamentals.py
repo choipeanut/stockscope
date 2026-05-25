@@ -38,12 +38,14 @@ def _get_kr_fundamentals(ticker: str) -> dict:
         import OpenDartReader as dart
         dr = dart.OpenDartReader(dart_key)
 
-        # Find corp code
-        corp = dr.find_corp_code(ticker)
-        if corp is None or corp.empty:
+        # corp_codes DataFrame has columns: corp_code, corp_name, stock_code, modify_date
+        # find_corp_code()는 회사명 검색 → 종목코드로 직접 조회해야 함
+        codes_df = dr.corp_codes
+        match = codes_df[codes_df["stock_code"] == ticker]
+        if match is None or match.empty:
             result["available"] = False
             return result
-        corp_code = corp.iloc[0]["corp_code"]
+        corp_code = match.iloc[0]["corp_code"]
 
         year = datetime.now(timezone.utc).year
         # Try current year first, fall back to prior year

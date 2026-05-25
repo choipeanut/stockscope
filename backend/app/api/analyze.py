@@ -158,7 +158,7 @@ def analyze(
             "components": _clean(momentum_result.components),
             "unavailable": momentum_result.unavailable,
         },
-        "valuation_detail": _clean(val_result.components),
+        "valuation_detail": _clean(val_data),  # 실제 PER/PBR/PSR 수치 (점수 아님)
         "supply_demand_detail": {
             "components": _clean(sd_result.components),
             "proxy": sd_result.proxy,
