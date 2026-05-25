@@ -5,22 +5,29 @@ interface Holding {
   ticker: string;
   market: string;
   qty: number;
-  avg_price: number;
-  current_price: number;
-  position_value: number;
-  unrealized_pnl: number;
+  avg_price: number;       // KRW
+  current_price: number;   // KRW
+  current_price_usd?: number; // NASDAQ만
+  position_value: number;  // KRW
+  unrealized_pnl: number;  // KRW
   pnl_pct: number;
+  currency: "KRW" | "USD";
 }
 
 interface PortfolioData {
   cash: number;
   base_currency: string;
+  fx_rate_usd: number;
   holdings: Holding[];
   totals: { positions_value: number; total_assets: number };
 }
 
 function pnlColor(v: number) {
   return v > 0 ? "#22c55e" : v < 0 ? "#ef4444" : "#9ca3af";
+}
+
+function fmtKrw(v: number) {
+  return "₩" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
 export function Portfolio() {
@@ -31,17 +38,19 @@ export function Portfolio() {
   });
 
   return (
-    <div
-      style={{
-        background: "#111827",
-        border: "1px solid #374151",
-        borderRadius: 12,
-        padding: 24,
-        color: "#f9fafb",
-      }}
-    >
+    <div style={{
+      background: "#111827", border: "1px solid #374151",
+      borderRadius: 12, padding: 24, color: "#f9fafb",
+    }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>포트폴리오</h3>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>포트폴리오</h3>
+          {data?.fx_rate_usd && (
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
+              💱 USD/KRW ₩{data.fx_rate_usd.toLocaleString()} · 모든 금액 KRW 기준
+            </div>
+          )}
+        </div>
         <button
           onClick={() => refetch()}
           disabled={isFetching}
@@ -57,16 +66,11 @@ export function Portfolio() {
       {data && (
         <>
           {/* Summary */}
-          <div
-            style={{
-              display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 12, marginBottom: 20,
-            }}
-          >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
             {[
-              { label: "가용 현금", value: data.cash.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
-              { label: "보유 자산", value: data.totals.positions_value.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
-              { label: "총 자산", value: data.totals.total_assets.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
+              { label: "가용 현금 (KRW)", value: fmtKrw(data.cash) },
+              { label: "보유 자산 (KRW)", value: fmtKrw(data.totals.positions_value) },
+              { label: "총 자산 (KRW)", value: fmtKrw(data.totals.total_assets) },
             ].map((item) => (
               <div key={item.label} style={{ background: "#1f2937", borderRadius: 8, padding: "10px 14px" }}>
                 <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>{item.label}</div>
@@ -85,7 +89,7 @@ export function Portfolio() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid #374151" }}>
-                    {["종목", "시장", "수량", "평균단가", "현재가", "평가금액", "손익", "수익률"].map((h) => (
+                    {["종목", "시장", "수량", "평균단가(₩)", "현재가(₩)", "평가금액(₩)", "손익(₩)", "수익률"].map((h) => (
                       <th key={h} style={{ padding: "6px 8px", textAlign: "right", color: "#6b7280", fontWeight: 500, whiteSpace: "nowrap" }}>
                         {h}
                       </th>
@@ -95,14 +99,28 @@ export function Portfolio() {
                 <tbody>
                   {data.holdings.map((h) => (
                     <tr key={`${h.ticker}-${h.market}`} style={{ borderBottom: "1px solid #1f2937" }}>
-                      <td style={{ padding: "8px 8px", fontWeight: 600 }}>{h.ticker}</td>
+                      <td style={{ padding: "8px 8px", fontWeight: 600 }}>
+                        {h.ticker}
+                        {h.currency === "USD" && (
+                          <span style={{ fontSize: 10, color: "#60a5fa", marginLeft: 4 }}>USD</span>
+                        )}
+                      </td>
                       <td style={{ padding: "8px 8px", color: "#9ca3af", textAlign: "right" }}>{h.market}</td>
                       <td style={{ padding: "8px 8px", textAlign: "right" }}>{h.qty}</td>
-                      <td style={{ padding: "8px 8px", textAlign: "right" }}>{h.avg_price.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      <td style={{ padding: "8px 8px", textAlign: "right" }}>{h.current_price.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      <td style={{ padding: "8px 8px", textAlign: "right" }}>{h.position_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                      <td style={{ padding: "8px 8px", textAlign: "right" }}>
+                        {fmtKrw(h.avg_price)}
+                      </td>
+                      <td style={{ padding: "8px 8px", textAlign: "right" }}>
+                        {fmtKrw(h.current_price)}
+                        {h.current_price_usd && (
+                          <div style={{ fontSize: 10, color: "#6b7280" }}>
+                            ${h.current_price_usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: "8px 8px", textAlign: "right" }}>{fmtKrw(h.position_value)}</td>
                       <td style={{ padding: "8px 8px", textAlign: "right", color: pnlColor(h.unrealized_pnl) }}>
-                        {h.unrealized_pnl >= 0 ? "+" : ""}{h.unrealized_pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        {h.unrealized_pnl >= 0 ? "+" : ""}{fmtKrw(h.unrealized_pnl).replace("₩", "")}
                       </td>
                       <td style={{ padding: "8px 8px", textAlign: "right", color: pnlColor(h.pnl_pct) }}>
                         {h.pnl_pct >= 0 ? "+" : ""}{h.pnl_pct.toFixed(2)}%
