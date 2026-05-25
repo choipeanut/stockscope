@@ -11,6 +11,7 @@ import { ScreenTable } from "./components/ScreenTable";
 import { MacroDashboard } from "./components/MacroDashboard";
 import { Watchlist, WatchlistAddButton } from "./components/Watchlist";
 import { NewsPanel } from "./components/NewsPanel";
+import { MetricsPanel } from "./components/MetricsPanel";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5 * 60 * 1000 } },
@@ -200,6 +201,9 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
                 <ScenarioPanel scenarios={data.scenarios} />
               </div>
             )}
+
+            {/* Quantitative metrics */}
+            <MetricsPanel data={data} />
 
             {/* News & Disclosures */}
             <NewsPanel ticker={data.ticker} market={data.market} />

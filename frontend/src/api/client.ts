@@ -62,7 +62,7 @@ export interface AnalyzeResponse {
   valuation_detail: Record<string, number | null>;
   supply_demand_detail: SupplyDemandDetail;
   macro_detail: MacroDetail;
-  risk_detail: { penalties: Record<string, number>; partial: boolean };
+  risk_detail: { penalties: Record<string, number>; partial: boolean; components?: Record<string, number | null> };
   scenarios: Scenario[];
   ohlcv: OhlcvRow[];
   notice: string;
@@ -110,7 +110,7 @@ export interface NewsItem {
   source: string;
   published: string;
   summary: string;
-  type: "news" | "disclosure";
+  type: "news" | "disclosure" | "macro_news";
 }
 
 export interface NewsResponse {
