@@ -138,6 +138,7 @@ def get_news(ticker: str, market: str, limit: int = 10) -> dict:
 
     news: list[dict] = []
     disclosures: list[dict] = []
+    macro_news: list[dict] = []
 
     if market.upper() == "NASDAQ":
         news = _fetch_yf_news(ticker, limit)
@@ -146,19 +147,24 @@ def get_news(ticker: str, market: str, limit: int = 10) -> dict:
         disclosures = _fetch_dart_disclosures(ticker, limit)
         news = _fetch_yf_news(ticker, min(5, limit))
 
-    # 감성 분석 (Claude)
+    # 거시 환경 뉴스 (NewsAPI)
+    from app.collectors.news_macro import get_macro_news
+    macro_news = get_macro_news(ticker, market, limit=5)
+
+    # 감성 분석 (Claude) — 종목 뉴스 + 거시 뉴스 합산
     from app.services.sentiment import analyze_sentiment
-    sentiment = analyze_sentiment(ticker, market, news, disclosures)
+    sentiment = analyze_sentiment(ticker, market, news, disclosures, macro_news=macro_news)
 
     result = {
         "ticker": ticker,
         "market": market,
         "news": news,
         "disclosures": disclosures,
+        "macro_news": macro_news,
         "sentiment": sentiment,
         "as_of": datetime.now(timezone.utc).isoformat(),
     }
     # 뉴스가 있을 때만 캐시 — 빈 결과는 캐시하지 않음
-    if news or disclosures:
+    if news or disclosures or macro_news:
         cache.set(key, result, _TTL)
     return result

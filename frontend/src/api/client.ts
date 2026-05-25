@@ -118,6 +118,7 @@ export interface NewsResponse {
   market: string;
   news: NewsItem[];
   disclosures: NewsItem[];
+  macro_news: NewsItem[];
   sentiment: SentimentResult;
   as_of: string;
 }

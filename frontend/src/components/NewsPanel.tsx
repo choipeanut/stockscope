@@ -23,9 +23,15 @@ function timeAgo(dateStr: string): string {
 
 function NewsCard({ item }: { item: NewsItem }) {
   const isDisclosure = item.type === "disclosure";
+  const isMacro = item.type === "macro_news";
+  const borderColor = isDisclosure ? "#f59e0b" : isMacro ? "#a78bfa" : "#3b82f6";
+  const badgeBg = isDisclosure ? "#92400e33" : isMacro ? "#4c1d9533" : "#1e3a5f";
+  const badgeColor = isDisclosure ? "#fbbf24" : isMacro ? "#c4b5fd" : "#93c5fd";
+  const badgeLabel = isDisclosure ? "📋 공시" : isMacro ? "🌐 거시" : "📰 뉴스";
+
   return (
     <a
-      href={item.url}
+      href={item.url || "#"}
       target="_blank"
       rel="noopener noreferrer"
       style={{ textDecoration: "none", color: "inherit" }}
@@ -36,7 +42,7 @@ function NewsCard({ item }: { item: NewsItem }) {
           borderRadius: 8,
           padding: "12px 14px",
           marginBottom: 8,
-          borderLeft: `3px solid ${isDisclosure ? "#f59e0b" : "#3b82f6"}`,
+          borderLeft: `3px solid ${borderColor}`,
           cursor: "pointer",
           transition: "background 0.15s",
         }}
@@ -49,12 +55,12 @@ function NewsCard({ item }: { item: NewsItem }) {
               fontSize: 11,
               padding: "1px 6px",
               borderRadius: 3,
-              background: isDisclosure ? "#92400e33" : "#1e3a5f",
-              color: isDisclosure ? "#fbbf24" : "#93c5fd",
+              background: badgeBg,
+              color: badgeColor,
               whiteSpace: "nowrap",
             }}
           >
-            {isDisclosure ? "📋 공시" : "📰 뉴스"}
+            {badgeLabel}
           </span>
           <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>
             {item.source && `${item.source} · `}{timeAgo(item.published)}
@@ -81,10 +87,9 @@ export function NewsPanel({ ticker, market }: Props) {
     refetchOnWindowFocus: false,
   });
 
-  const allItems = [
-    ...(data?.disclosures ?? []),
-    ...(data?.news ?? []),
-  ];
+  const stockItems = [...(data?.disclosures ?? []), ...(data?.news ?? [])];
+  const macroItems = data?.macro_news ?? [];
+  const hasAny = stockItems.length > 0 || macroItems.length > 0;
 
   return (
     <div
@@ -121,15 +126,31 @@ export function NewsPanel({ ticker, market }: Props) {
         </div>
       )}
 
-      {!isFetching && allItems.length === 0 && !error && (
+      {!isFetching && !hasAny && !error && (
         <div style={{ fontSize: 13, color: "#6b7280", textAlign: "center", padding: "16px 0" }}>
           최근 뉴스/공시가 없습니다.
         </div>
       )}
 
-      {allItems.map((item, i) => (
-        <NewsCard key={i} item={item} />
-      ))}
+      {/* 종목 뉴스 & 공시 */}
+      {stockItems.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8, fontWeight: 600 }}>
+            종목 직접 뉴스 / 공시
+          </div>
+          {stockItems.map((item, i) => <NewsCard key={`stock-${i}`} item={item} />)}
+        </>
+      )}
+
+      {/* 거시 환경 뉴스 */}
+      {macroItems.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, color: "#6b7280", margin: "14px 0 8px", fontWeight: 600 }}>
+            🌐 거시 환경 뉴스 (국제 정세 · 금리 · 무역)
+          </div>
+          {macroItems.map((item, i) => <NewsCard key={`macro-${i}`} item={item} />)}
+        </>
+      )}
 
       {data?.as_of && (
         <div style={{ fontSize: 11, color: "#4b5563", marginTop: 8, textAlign: "right" }}>
