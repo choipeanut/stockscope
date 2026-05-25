@@ -98,6 +98,18 @@ export function MetricsPanel({ data }: Props) {
         {val?.market_cap != null && (
           <Metric label="시가총액" value={fmtLarge(val.market_cap)} />
         )}
+        {val?.roe != null && (
+          <Metric label="ROE" value={fmt(val.roe, 1, "%")}
+            hint="자기자본이익률"
+            color={val.roe > 15 ? "#22c55e" : val.roe < 5 ? "#ef4444" : "#f59e0b"} />
+        )}
+        {val?.revenue_growth != null && (
+          <Metric label="매출성장(YoY)" value={fmt(val.revenue_growth, 1, "%")}
+            color={val.revenue_growth > 0 ? "#22c55e" : "#ef4444"} />
+        )}
+        {val?.fcf != null && (
+          <Metric label="잉여현금흐름" value={fmtLarge(val.fcf)} hint="FCF" />
+        )}
         {val?.per_5y_pct != null && (
           <Metric
             label="PER 5년 분위"
