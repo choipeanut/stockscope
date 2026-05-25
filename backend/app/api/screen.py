@@ -7,9 +7,8 @@ Results cached in-process for 30 minutes.
 from __future__ import annotations
 
 import logging
-import socket
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait as cf_wait
+from concurrent.futures import ThreadPoolExecutor, wait as cf_wait
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query
@@ -21,8 +20,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 1800  # 30분
-_WALL_TIMEOUT = 55  # 초 — HTTP 응답 전 최대 대기
-_SOCKET_TIMEOUT = 20  # 초 — 각 네트워크 소켓 타임아웃 (Render cold-start 고려해 여유있게)
+_WALL_TIMEOUT = 55  # 초 — wall-clock 최대 대기 (Render HTTP 제한 고려)
 
 _last_result: dict | None = None
 _last_run_at: float = 0.0  # time.time()
@@ -75,46 +73,47 @@ def screen(
 
 
 def _run_sync(market_filter: str | None) -> list[dict]:
-    """소켓 타임아웃 + wall-clock 제한 안에서 종목 스코어링."""
-    # 이 스레드 내부에서 소켓 타임아웃 설정
-    orig_timeout = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(_SOCKET_TIMEOUT)
+    """wall-clock 제한 안에서 종목 스코어링.
 
+    소켓 타임아웃을 쓰지 않음 — Render cold-start에서 yfinance가 12s를 초과할 수 있음.
+    대신 cf_wait(timeout) 로 wall-clock 한도를 지키고,
+    pool.shutdown(wait=False) 로 미완료 스레드를 블록 없이 해제.
+    """
     tickers = get_universe(market_filter)
     logger.info("[screener] universe: %d tickers", len(tickers))
 
     results: list[dict] = []
+    pool = ThreadPoolExecutor(max_workers=8)
     try:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            future_map = {
-                pool.submit(_safe_score_ticker, item["ticker"], item["market"]): item
-                for item in tickers
-            }
-            # wall-clock 타임아웃: 완료된 것만 수집
-            done, not_done = cf_wait(future_map.keys(), timeout=_WALL_TIMEOUT)
+        future_map = {
+            pool.submit(_safe_score_ticker, item["ticker"], item["market"]): item
+            for item in tickers
+        }
+        # wall-clock 타임아웃: 완료된 것만 수집
+        done, not_done = cf_wait(future_map.keys(), timeout=_WALL_TIMEOUT)
 
-            if not_done:
-                logger.warning(
-                    "[screener] %d/%d tickers timed out after %ds",
-                    len(not_done), len(tickers), _WALL_TIMEOUT,
-                )
+        if not_done:
+            logger.warning(
+                "[screener] %d/%d tickers timed out after %ds",
+                len(not_done), len(tickers), _WALL_TIMEOUT,
+            )
 
-            for fut in done:
-                item = future_map[fut]
-                try:
-                    result = fut.result()
-                except Exception as e:
-                    logger.debug("[screener] %s failed: %s", item["ticker"], e)
-                    result = None
+        for fut in done:
+            item = future_map[fut]
+            try:
+                result = fut.result()
+            except Exception as e:
+                logger.debug("[screener] %s failed: %s", item["ticker"], e)
+                result = None
 
-                if result is None or result.get("composite") is None:
-                    continue
+            if result is None or result.get("composite") is None:
+                continue
 
-                result["name"] = item.get("name", "")
-                results.append(result)
-
+            result["name"] = item.get("name", "")
+            results.append(result)
     finally:
-        socket.setdefaulttimeout(orig_timeout)
+        # 미완료 스레드를 기다리지 않고 즉시 응답 반환
+        pool.shutdown(wait=False)
 
     results.sort(key=lambda r: r.get("composite") or 0, reverse=True)
     return results
