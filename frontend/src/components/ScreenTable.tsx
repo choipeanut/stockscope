@@ -189,16 +189,21 @@ export function ScreenTable({ onDrillDown }: Props) {
         }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>🔍</div>
           <div style={{ fontSize: 15, fontWeight: 600, color: "#f9fafb", marginBottom: 6 }}>
-            50개 종목 분석 중...
+            30개 종목 분석 중...
           </div>
           <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
             백그라운드에서 실행 중 · 결과가 나오면 자동으로 표시됩니다
           </div>
+          {(data as { error?: string | null })?.error && (
+            <div style={{ fontSize: 12, color: "#ef4444", marginBottom: 8 }}>
+              이전 실행 오류: {(data as { error?: string | null }).error}
+            </div>
+          )}
           <div style={{
             display: "inline-block", background: "#1f2937",
             borderRadius: 8, padding: "8px 20px", fontSize: 12, color: "#9ca3af",
           }}>
-            보통 20~30초 소요
+            보통 1~2분 소요 (자동 새로고침 중)
           </div>
         </div>
       )}

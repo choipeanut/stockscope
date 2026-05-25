@@ -1,8 +1,14 @@
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")  # must run before app imports
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402

@@ -24,8 +24,8 @@ from app.scoring.valuation import compute_valuation
 
 logger = logging.getLogger(__name__)
 
-_MAX_WORKERS = 4
-_MIN_INTERVAL = 0.3  # seconds between requests per source
+_MAX_WORKERS = 6
+_MIN_INTERVAL = 0.2  # seconds between requests per source
 
 _INDEX_TICKER: dict[str, str] = {
     "KOSDAQ": "^KQ11",
