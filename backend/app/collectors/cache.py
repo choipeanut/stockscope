@@ -51,3 +51,18 @@ def set(key: str, value: Any, ttl_seconds: int) -> str:
         )
         con.commit()
     return as_of
+
+
+def delete(key: str) -> None:
+    """Delete a single cache entry."""
+    with _conn() as con:
+        con.execute("DELETE FROM cache WHERE key = ?", (key,))
+        con.commit()
+
+
+def delete_prefix(prefix: str) -> int:
+    """Delete all cache entries whose key starts with prefix. Returns count deleted."""
+    with _conn() as con:
+        cur = con.execute("DELETE FROM cache WHERE key LIKE ?", (prefix + "%",))
+        con.commit()
+        return cur.rowcount

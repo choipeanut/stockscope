@@ -22,34 +22,39 @@ def _fetch_yf_news(ticker: str, limit: int = 10) -> list[dict]:
         raw = t.news or []
         items = []
         for n in raw[:limit]:
-            content = n.get("content", {})
-            # yfinance v0.2.x returns nested content dict
-            title = content.get("title") or n.get("title", "")
-            url = (
-                content.get("canonicalUrl", {}).get("url")
-                or content.get("clickThroughUrl", {}).get("url")
-                or n.get("link", "")
-            )
-            pub_ts = content.get("pubDate") or n.get("providerPublishTime")
-            if isinstance(pub_ts, (int, float)):
-                published = datetime.fromtimestamp(pub_ts, tz=timezone.utc).isoformat()
-            elif isinstance(pub_ts, str):
-                published = pub_ts
-            else:
-                published = ""
+            try:
+                content = n.get("content") or {}
+                # yfinance v0.2.x returns nested content dict
+                title = content.get("title") or n.get("title", "")
+                url = (
+                    (content.get("canonicalUrl") or {}).get("url")
+                    or (content.get("clickThroughUrl") or {}).get("url")
+                    or n.get("link", "")
+                )
+                pub_ts = content.get("pubDate") or n.get("providerPublishTime")
+                if isinstance(pub_ts, (int, float)):
+                    published = datetime.fromtimestamp(pub_ts, tz=timezone.utc).isoformat()
+                elif isinstance(pub_ts, str):
+                    published = pub_ts
+                else:
+                    published = ""
 
-            provider = content.get("provider", {}).get("displayName") or n.get("publisher", "")
-            summary = content.get("summary", "")
+                provider = (
+                    (content.get("provider") or {}).get("displayName") or n.get("publisher", "")
+                )
+                summary = content.get("summary", "")
 
-            if title and url:
-                items.append({
-                    "title": title,
-                    "url": url,
-                    "source": provider,
-                    "published": published,
-                    "summary": summary[:200] if summary else "",
-                    "type": "news",
-                })
+                if title:
+                    items.append({
+                        "title": title,
+                        "url": url or "",
+                        "source": provider,
+                        "published": published,
+                        "summary": summary[:200] if summary else "",
+                        "type": "news",
+                    })
+            except Exception:
+                continue
         return items
     except Exception:
         return []
@@ -153,5 +158,7 @@ def get_news(ticker: str, market: str, limit: int = 10) -> dict:
         "sentiment": sentiment,
         "as_of": datetime.now(timezone.utc).isoformat(),
     }
-    cache.set(key, result, _TTL)
+    # 뉴스가 있을 때만 캐시 — 빈 결과는 캐시하지 않음
+    if news or disclosures:
+        cache.set(key, result, _TTL)
     return result
