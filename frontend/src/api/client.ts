@@ -2,7 +2,7 @@ import axios from "axios";
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:8000",
-  timeout: 10_000,
+  timeout: 120_000, // 2분 — Render 무료 플랜 cold start 대응
 });
 
 export interface OhlcvRow {
