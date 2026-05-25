@@ -51,6 +51,9 @@ export interface AnalyzeResponse {
   market: string;
   as_of: string;
   composite: number | null;
+  composite_raw: number | null;
+  sentiment_delta: number;
+  sentiment: SentimentResult;
   factors: FactorScores;
   unavailable: string[];
   renormalized: boolean;
@@ -91,6 +94,16 @@ export interface ScreenResponse {
   results: ScreenRow[];
 }
 
+export interface SentimentResult {
+  sentiment: "positive" | "negative" | "neutral";
+  score_delta: number;
+  confidence: "high" | "medium" | "low";
+  summary: string;
+  key_signals: string[];
+  available: boolean;
+  reason?: string;
+}
+
 export interface NewsItem {
   title: string;
   url: string;
@@ -105,6 +118,7 @@ export interface NewsResponse {
   market: string;
   news: NewsItem[];
   disclosures: NewsItem[];
+  sentiment: SentimentResult;
   as_of: string;
 }
 

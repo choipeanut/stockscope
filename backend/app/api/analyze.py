@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.collectors.flows import get_flows
 from app.collectors.fundamentals import get_fundamentals
 from app.collectors.macro import get_macro
+from app.collectors.news import get_news
 from app.collectors.prices import get_ohlcv
 from app.collectors.risk import get_risk
 from app.collectors.valuation import get_valuation
@@ -99,6 +100,22 @@ def analyze(
 
     composite_result = compute_composite(factor_scores, as_of=as_of)
 
+    # ── News & Sentiment ─────────────────────────────────────────────
+    try:
+        news_data = get_news(ticker, market, limit=10)
+        sentiment = news_data.get("sentiment", {})
+        delta = int(sentiment.get("score_delta", 0)) if sentiment.get("available") else 0
+    except Exception:
+        news_data = {"news": [], "disclosures": [], "sentiment": {}}
+        sentiment = {}
+        delta = 0
+
+    raw_composite = composite_result.composite
+    adjusted_composite = (
+        None if raw_composite is None
+        else max(0.0, min(100.0, raw_composite + delta))
+    )
+
     # ── Scenarios ────────────────────────────────────────────────────
     scenarios = generate_scenarios(
         factors=factor_scores,
@@ -129,7 +146,10 @@ def analyze(
         "ticker": ticker,
         "market": market,
         "as_of": as_of,
-        "composite": _s(composite_result.composite),
+        "composite": _s(adjusted_composite),
+        "composite_raw": _s(raw_composite),
+        "sentiment_delta": delta,
+        "sentiment": sentiment,
         "factors": _clean(composite_result.factors),
         "unavailable": composite_result.unavailable,
         "renormalized": composite_result.renormalized,

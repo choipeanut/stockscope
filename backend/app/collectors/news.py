@@ -141,11 +141,16 @@ def get_news(ticker: str, market: str, limit: int = 10) -> dict:
         disclosures = _fetch_dart_disclosures(ticker, limit)
         news = _fetch_yf_news(ticker, min(5, limit))
 
+    # 감성 분석 (Claude)
+    from app.services.sentiment import analyze_sentiment
+    sentiment = analyze_sentiment(ticker, market, news, disclosures)
+
     result = {
         "ticker": ticker,
         "market": market,
         "news": news,
         "disclosures": disclosures,
+        "sentiment": sentiment,
         "as_of": datetime.now(timezone.utc).isoformat(),
     }
     cache.set(key, result, _TTL)

@@ -70,8 +70,53 @@ interface Props {
   data: AnalyzeResponse;
 }
 
+function SentimentBadge({ sentiment, delta }: { sentiment: AnalyzeResponse["sentiment"]; delta: number }) {
+  if (!sentiment?.available) return null;
+  const s = sentiment.sentiment;
+  const color = s === "positive" ? "#22c55e" : s === "negative" ? "#ef4444" : "#9ca3af";
+  const bg = s === "positive" ? "#052e16" : s === "negative" ? "#1c0a09" : "#111827";
+  const label = s === "positive" ? "긍정적" : s === "negative" ? "부정적" : "중립";
+  const deltaStr = delta > 0 ? `+${delta}` : `${delta}`;
+  const confColor = sentiment.confidence === "high" ? "#22c55e" : sentiment.confidence === "medium" ? "#f59e0b" : "#9ca3af";
+
+  return (
+    <div style={{
+      background: bg, border: `1px solid ${color}33`,
+      borderRadius: 8, padding: "10px 14px", marginBottom: 16,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>📰 뉴스 감성 분석</span>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: confColor }}>{sentiment.confidence}</span>
+          <span style={{
+            fontSize: 12, fontWeight: 700, color, background: `${color}22`,
+            borderRadius: 4, padding: "2px 8px",
+          }}>
+            {label} {delta !== 0 && <span>({deltaStr}점)</span>}
+          </span>
+        </div>
+      </div>
+      {sentiment.summary && (
+        <div style={{ fontSize: 12, color: "#d1d5db", marginBottom: 4 }}>{sentiment.summary}</div>
+      )}
+      {sentiment.key_signals?.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {sentiment.key_signals.map((sig, i) => (
+            <span key={i} style={{
+              fontSize: 11, color: "#9ca3af", background: "#1f2937",
+              borderRadius: 4, padding: "2px 6px",
+            }}>
+              {sig}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ScoreCard({ data }: Props) {
-  const { composite, factors, unavailable, renormalized, as_of, ticker, market, notice } = data;
+  const { composite, composite_raw, sentiment_delta, sentiment, factors, unavailable, renormalized, as_of, ticker, market, notice } = data;
   const asOfDate = new Date(as_of).toLocaleString("ko-KR");
 
   return (
@@ -118,6 +163,16 @@ export function ScoreCard({ data }: Props) {
           </div>
         )}
       </div>
+
+      {/* Sentiment delta hint under the circle */}
+      {sentiment?.available && sentiment_delta !== 0 && composite_raw !== null && (
+        <div style={{ fontSize: 11, color: "#6b7280", textAlign: "right", marginTop: -12, marginBottom: 8 }}>
+          기본 점수 {composite_raw.toFixed(1)} → 감성 보정 {sentiment_delta > 0 ? `+${sentiment_delta}` : sentiment_delta}
+        </div>
+      )}
+
+      {/* Sentiment analysis badge */}
+      <SentimentBadge sentiment={sentiment} delta={sentiment_delta ?? 0} />
 
       {renormalized && (
         <div
