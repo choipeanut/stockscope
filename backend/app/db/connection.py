@@ -117,14 +117,25 @@ CREATE TABLE IF NOT EXISTS watchlist (
 
 
 def _pg_conn():
-    """psycopg2 연결 반환."""
+    """psycopg2 연결 반환 (Supabase SSL 포함)."""
     import psycopg2
     import psycopg2.extras
+    from urllib.parse import urlparse, unquote
+
     url = _DATABASE_URL
-    # Supabase는 postgres:// 접두사 사용 → psycopg2는 postgresql:// 필요
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
-    con = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
+
+    parsed = urlparse(url)
+    con = psycopg2.connect(
+        host=parsed.hostname,
+        port=parsed.port or 5432,
+        dbname=parsed.path.lstrip("/"),
+        user=parsed.username,
+        password=unquote(parsed.password or ""),
+        sslmode="require",
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
     return con
 
 
