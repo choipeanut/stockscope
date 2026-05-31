@@ -200,6 +200,23 @@ export async function fetchNews(ticker: string, market: string, limit = 10): Pro
   return data;
 }
 
+export interface PricesResponse {
+  ticker: string;
+  market: string;
+  ohlcv: OhlcvRow[];
+}
+
+export async function fetchPrices(
+  ticker: string,
+  market: string,
+  days = 365,
+): Promise<PricesResponse> {
+  const { data } = await api.get<PricesResponse>("/prices", {
+    params: { ticker, market, days },
+  });
+  return data;
+}
+
 export async function fetchScreen(
   market?: string,
   minScore?: number,

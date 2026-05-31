@@ -118,6 +118,17 @@ def get_realized_pnl(user_id: int) -> float:
     return float(row["total"]) if row else 0.0
 
 
+def get_first_buy_ts(user_id: int, ticker: str, market: str) -> str | None:
+    """해당 종목의 첫 매수 시점(ISO 문자열) 반환."""
+    with get_conn() as con:
+        row = fetchone(con,
+            "SELECT MIN(ts) as first_ts FROM transactions"
+            " WHERE user_id=? AND ticker=? AND market=? AND side='BUY'",
+            (user_id, ticker, market),
+        )
+    return row["first_ts"] if row and row.get("first_ts") else None
+
+
 def migrate_add_realized_pnl() -> None:
     """기존 DB에 realized_pnl 컬럼 없으면 추가 (SQLite 전용 — PG는 스키마에 이미 포함)."""
     from app.db.connection import is_postgres

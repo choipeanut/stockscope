@@ -49,6 +49,28 @@ def transactions(limit: int = 50, user: dict = Depends(get_current_user)) -> dic
     return {"transactions": repo.get_transactions(user["user_id"], limit)}
 
 
+@router.get("/prices")
+def prices(
+    ticker: str,
+    market: str,
+    days: int = 365,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """가벼운 OHLCV 조회 — 포트폴리오 차트용 (팩터 계산 없음)."""
+    from app.collectors.prices import get_ohlcv
+    market = market.upper()
+    try:
+        df = get_ohlcv(ticker.upper(), market, period_days=days)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"가격 조회 실패: {e}")
+    records = df.tail(days).copy()
+    records["date"] = records["date"].astype(str)
+    ohlcv = records[["date", "open", "high", "low", "close", "volume"]].to_dict(
+        orient="records"
+    )
+    return {"ticker": ticker.upper(), "market": market, "ohlcv": ohlcv}
+
+
 @router.post("/watchlist")
 def add_watchlist(ticker: str, market: str, user: dict = Depends(get_current_user)) -> dict:
     return repo.add_watchlist(user["user_id"], ticker.upper(), market.upper())

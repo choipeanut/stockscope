@@ -242,12 +242,16 @@ def get_portfolio(user_id: int) -> dict:
             "unrealized_pnl": round(unrealized_pnl, 0),
             "pnl_pct": round((price_krw / h["avg_price"] - 1) * 100, 2)
                 if h["avg_price"] > 0 else 0.0,
+            "first_buy_ts": repo.get_first_buy_ts(user_id, h["ticker"], h["market"]),
         }
         if h["market"] == "NASDAQ":
             item["current_price_usd"] = round(price_native, 2)
             item["currency"] = "USD"
+            # 매수 평균가를 원래 통화(USD)로 근사 (현재 환율 기준)
+            item["avg_price_native"] = round(h["avg_price"] / fx_rate, 2) if fx_rate else h["avg_price"]
         else:
             item["currency"] = "KRW"
+            item["avg_price_native"] = h["avg_price"]
 
         holdings.append(item)
 

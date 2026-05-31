@@ -1,18 +1,23 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { api, fetchPrices } from "../api/client";
+import { PriceChart } from "./PriceChart";
+import { TradeForm } from "./TradeForm";
 
 interface Holding {
   ticker: string;
   market: string;
   name?: string;
   qty: number;
-  avg_price: number;       // KRW
-  current_price: number;   // KRW
-  current_price_usd?: number; // NASDAQ만
-  position_value: number;  // KRW
-  unrealized_pnl: number;  // KRW
+  avg_price: number;            // KRW
+  avg_price_native?: number;    // 원본 통화 (차트 기준선용)
+  current_price: number;        // KRW
+  current_price_usd?: number;   // NASDAQ만
+  position_value: number;       // KRW
+  unrealized_pnl: number;       // KRW
   pnl_pct: number;
   currency: "KRW" | "USD";
+  first_buy_ts?: string | null;
 }
 
 interface PortfolioData {
@@ -36,7 +41,58 @@ function fmtKrw(v: number) {
   return "₩" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
+/** 확장된 종목 상세 — 매수 후 차트 + 매도 폼 */
+function HoldingDetail({ h }: { h: Holding }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["prices", h.ticker, h.market],
+    queryFn: () => fetchPrices(h.ticker, h.market, 365),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+  const nativePrice = h.currency === "USD" ? h.current_price_usd : h.current_price;
+
+  return (
+    <div style={{
+      display: "flex", gap: 16, flexWrap: "wrap",
+      padding: "16px 4px", alignItems: "flex-start",
+    }}>
+      <div style={{ flex: 2, minWidth: 320 }}>
+        {isLoading && (
+          <div style={{ color: "#6b7280", fontSize: 13, padding: "20px 0", textAlign: "center" }}>
+            차트 불러오는 중...
+          </div>
+        )}
+        {error && (
+          <div style={{ color: "#ef4444", fontSize: 13 }}>차트 로드 실패</div>
+        )}
+        {data && data.ohlcv.length > 0 && (
+          <PriceChart
+            ohlcv={data.ohlcv}
+            ticker={h.ticker}
+            buyPrice={h.avg_price_native}
+            buyDate={h.first_buy_ts ?? undefined}
+            title={`${h.name ?? h.ticker} — 매수 후 추이`}
+          />
+        )}
+      </div>
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <TradeForm
+          ticker={h.ticker}
+          market={h.market}
+          name={h.name}
+          currentPrice={nativePrice}
+          initialSide="SELL"
+          maxQty={h.qty}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function Portfolio() {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
   const { data, isFetching, refetch } = useQuery<PortfolioData>({
     queryKey: ["portfolio"],
     queryFn: async () => (await api.get("/portfolio")).data,
@@ -53,7 +109,7 @@ export function Portfolio() {
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>포트폴리오</h3>
           {data?.fx_rate_usd && (
             <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
-              💱 USD/KRW ₩{data.fx_rate_usd.toLocaleString()} · 모든 금액 KRW 기준
+              💱 USD/KRW ₩{data.fx_rate_usd.toLocaleString()} · 모든 금액 KRW 기준 · 종목 클릭 시 차트·매도
             </div>
           )}
         </div>
@@ -112,51 +168,74 @@ export function Portfolio() {
                   <tr style={{ borderBottom: "1px solid #374151" }}>
                     <th style={{ padding: "6px 8px", textAlign: "left", color: "#6b7280", fontWeight: 500, whiteSpace: "nowrap" }}>종목</th>
                     <th style={{ padding: "6px 8px", textAlign: "left", color: "#6b7280", fontWeight: 500, whiteSpace: "nowrap" }}>시장</th>
-                    {["수량", "평균단가(₩)", "현재가(₩)", "평가금액(₩)", "손익(₩)", "수익률"].map((h) => (
-                      <th key={h} style={{ padding: "6px 8px", textAlign: "right", color: "#6b7280", fontWeight: 500, whiteSpace: "nowrap" }}>
-                        {h}
+                    {["수량", "평균단가(₩)", "현재가(₩)", "평가금액(₩)", "손익(₩)", "수익률"].map((hh) => (
+                      <th key={hh} style={{ padding: "6px 8px", textAlign: "right", color: "#6b7280", fontWeight: 500, whiteSpace: "nowrap" }}>
+                        {hh}
                       </th>
                     ))}
+                    <th style={{ padding: "6px 8px", width: 24 }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {data.holdings.map((h) => (
-                    <tr key={`${h.ticker}-${h.market}`} style={{ borderBottom: "1px solid #1f2937" }}>
-                      <td style={{ padding: "8px 8px", fontWeight: 600 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          {h.ticker}
-                          {h.currency === "USD" && (
-                            <span style={{ fontSize: 10, color: "#60a5fa" }}>USD</span>
-                          )}
-                        </div>
-                        {h.name && (
-                          <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 400, marginTop: 2 }}>
-                            {h.name}
-                          </div>
+                  {data.holdings.map((h) => {
+                    const key = `${h.ticker}-${h.market}`;
+                    const isOpen = expanded === key;
+                    return (
+                      <>
+                        <tr
+                          key={key}
+                          onClick={() => setExpanded(isOpen ? null : key)}
+                          style={{
+                            borderBottom: isOpen ? "none" : "1px solid #1f2937",
+                            cursor: "pointer",
+                            background: isOpen ? "#0d1424" : "transparent",
+                          }}
+                        >
+                          <td style={{ padding: "8px 8px", fontWeight: 600 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              {h.ticker}
+                              {h.currency === "USD" && (
+                                <span style={{ fontSize: 10, color: "#60a5fa" }}>USD</span>
+                              )}
+                            </div>
+                            {h.name && (
+                              <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 400, marginTop: 2 }}>
+                                {h.name}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "8px 8px", color: "#9ca3af", verticalAlign: "top" }}>{h.market}</td>
+                          <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top" }}>{h.qty}</td>
+                          <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top" }}>{fmtKrw(h.avg_price)}</td>
+                          <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top" }}>
+                            {fmtKrw(h.current_price)}
+                            {h.current_price_usd && (
+                              <div style={{ fontSize: 10, color: "#6b7280" }}>
+                                ${h.current_price_usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top" }}>{fmtKrw(h.position_value)}</td>
+                          <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top", color: pnlColor(h.unrealized_pnl) }}>
+                            {h.unrealized_pnl >= 0 ? "+" : ""}{fmtKrw(h.unrealized_pnl).replace("₩", "")}
+                          </td>
+                          <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top", color: pnlColor(h.pnl_pct) }}>
+                            {h.pnl_pct >= 0 ? "+" : ""}{h.pnl_pct.toFixed(2)}%
+                          </td>
+                          <td style={{ padding: "8px 8px", textAlign: "center", verticalAlign: "top", color: "#6b7280" }}>
+                            {isOpen ? "▲" : "▼"}
+                          </td>
+                        </tr>
+                        {isOpen && (
+                          <tr key={`${key}-detail`} style={{ borderBottom: "1px solid #1f2937" }}>
+                            <td colSpan={9} style={{ padding: 0, background: "#0d1424" }}>
+                              <HoldingDetail h={h} />
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td style={{ padding: "8px 8px", color: "#9ca3af", verticalAlign: "top" }}>{h.market}</td>
-                      <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top" }}>{h.qty}</td>
-                      <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top" }}>
-                        {fmtKrw(h.avg_price)}
-                      </td>
-                      <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top" }}>
-                        {fmtKrw(h.current_price)}
-                        {h.current_price_usd && (
-                          <div style={{ fontSize: 10, color: "#6b7280" }}>
-                            ${h.current_price_usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top" }}>{fmtKrw(h.position_value)}</td>
-                      <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top", color: pnlColor(h.unrealized_pnl) }}>
-                        {h.unrealized_pnl >= 0 ? "+" : ""}{fmtKrw(h.unrealized_pnl).replace("₩", "")}
-                      </td>
-                      <td style={{ padding: "8px 8px", textAlign: "right", verticalAlign: "top", color: pnlColor(h.pnl_pct) }}>
-                        {h.pnl_pct >= 0 ? "+" : ""}{h.pnl_pct.toFixed(2)}%
-                      </td>
-                    </tr>
-                  ))}
+                      </>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

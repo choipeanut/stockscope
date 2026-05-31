@@ -7,11 +7,14 @@ interface Props {
   market: string;
   name?: string;
   currentPrice?: number; // 원본 통화 (NASDAQ=USD, KOSDAQ=KRW)
+  initialSide?: "BUY" | "SELL";
+  maxQty?: number;        // 매도 시 보유 수량 (초과 방지)
+  compact?: boolean;      // 포트폴리오 인라인용 간소 표시
 }
 
-export function TradeForm({ ticker, market, name, currentPrice }: Props) {
+export function TradeForm({ ticker, market, name, currentPrice, initialSide = "BUY", maxQty, compact }: Props) {
   const qc = useQueryClient();
-  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
+  const [side, setSide] = useState<"BUY" | "SELL">(initialSide);
   const [qty, setQty] = useState("1");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -65,10 +68,12 @@ export function TradeForm({ ticker, market, name, currentPrice }: Props) {
       background: "#111827", border: "1px solid #374151",
       borderRadius: 12, padding: 20, color: "#f9fafb",
     }}>
-      <h4 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 600 }}>
-        모의 투자 — {name ? `${name} (${ticker})` : ticker}
-        <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400, marginLeft: 6 }}>{market}</span>
-      </h4>
+      {!compact && (
+        <h4 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 600 }}>
+          모의 투자 — {name ? `${name} (${ticker})` : ticker}
+          <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400, marginLeft: 6 }}>{market}</span>
+        </h4>
+      )}
 
       {/* 환율 표시 (NASDAQ만) */}
       {isUsd && (
@@ -126,7 +131,11 @@ export function TradeForm({ ticker, market, name, currentPrice }: Props) {
           value={qty}
           min="1"
           step="1"
-          onChange={(e) => setQty(String(Math.max(1, Math.floor(Number(e.target.value)))))}
+          onChange={(e) => {
+            let n = Math.max(1, Math.floor(Number(e.target.value)));
+            if (side === "SELL" && maxQty != null) n = Math.min(n, maxQty);
+            setQty(String(n));
+          }}
           style={{
             flex: 1, background: "#1f2937", border: "1px solid #374151",
             borderRadius: 6, color: "#f9fafb", padding: "8px 12px",
@@ -134,6 +143,18 @@ export function TradeForm({ ticker, market, name, currentPrice }: Props) {
           }}
           placeholder="수량 (정수)"
         />
+        {side === "SELL" && maxQty != null && (
+          <button
+            onClick={() => setQty(String(maxQty))}
+            style={{
+              background: "#1f2937", border: "1px solid #374151", borderRadius: 6,
+              color: "#9ca3af", padding: "8px 10px", fontSize: 12, cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            전량 ({maxQty})
+          </button>
+        )}
         <span style={{ color: "#6b7280", fontSize: 13 }}>주</span>
       </div>
 
