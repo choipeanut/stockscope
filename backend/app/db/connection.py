@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS watchlist (
 
 
 def _pg_conn():
-    """psycopg2 연결 반환 (Supabase SSL 포함)."""
+    """psycopg2 연결 반환 (IPv4 강제 + Supabase SSL)."""
+    import socket
     import psycopg2
     import psycopg2.extras
     from urllib.parse import urlparse, unquote
@@ -127,9 +128,20 @@ def _pg_conn():
         url = "postgresql://" + url[len("postgres://"):]
 
     parsed = urlparse(url)
+    hostname = parsed.hostname
+    port = parsed.port or 5432
+
+    # IPv4 주소로 강제 변환 (Render 무료 플랜 IPv6 미지원 우회)
+    try:
+        ipv4_list = socket.getaddrinfo(hostname, port, socket.AF_INET, socket.SOCK_STREAM)
+        if ipv4_list:
+            hostname = ipv4_list[0][4][0]
+    except Exception:
+        pass  # 실패 시 원래 hostname 사용
+
     con = psycopg2.connect(
-        host=parsed.hostname,
-        port=parsed.port or 5432,
+        host=hostname,
+        port=port,
         dbname=parsed.path.lstrip("/"),
         user=parsed.username,
         password=unquote(parsed.password or ""),
