@@ -37,8 +37,22 @@ def _row(df, *names):
     return None
 
 
+def _get_fdr_shares(ticker: str) -> float | None:
+    """FinanceDataReader KRX 상장 정보에서 주식 수 조회."""
+    try:
+        import FinanceDataReader as fdr
+        df = fdr.StockListing("KRX")
+        row = df[df["Code"] == ticker]
+        if row.empty:
+            return None
+        v = row.iloc[0].get("Stocks")
+        return float(v) if v and float(v) > 0 else None
+    except Exception:
+        return None
+
+
 def _get_kr_valuation(ticker: str) -> dict:
-    """한국 주식 밸류에이션: pykrx 우선, 실패 시 yfinance .KS 폴백."""
+    """한국 주식 밸류에이션: pykrx 우선, 실패 시 yfinance .KS + FDR 폴백."""
     # 1) pykrx 시도
     pykrx_result = _try_pykrx_valuation(ticker)
     if pykrx_result.get("available"):
@@ -48,6 +62,50 @@ def _get_kr_valuation(ticker: str) -> dict:
     ks_ticker = ticker + ".KS"
     result = _get_us_valuation(ks_ticker)
     result["source"] = "yfinance_ks"
+
+    # 3) yfinance가 주식수를 못 가져왔을 경우 FDR에서 보완
+    if result.get("per") is None and result.get("pbr") is None:
+        fdr_shares = _get_fdr_shares(ticker)
+        if fdr_shares:
+            # yfinance 재무제표에서 순이익·자기자본 재시도 (shares 주입)
+            import yfinance as yf
+            tk = yf.Ticker(ks_ticker)
+            try:
+                income = tk.income_stmt
+                balance = tk.balance_sheet
+                price = None
+                try:
+                    price = float(tk.fast_info.last_price)
+                except Exception:
+                    hist = tk.history(period="5d")
+                    if not hist.empty:
+                        price = float(hist["Close"].iloc[-1])
+
+                net_income = _row(income,
+                    "Net Income", "Net Income Common Stockholders",
+                    "Net Income From Continuing Operation Net Minority Interest")
+                total_equity = _row(balance,
+                    "Stockholders Equity", "Total Equity Gross Minority Interest",
+                    "Common Stock Equity")
+
+                if price and net_income and fdr_shares > 0:
+                    eps = net_income / fdr_shares
+                    result["eps"] = round(eps, 4)
+                    if eps > 0:
+                        result["per"] = round(price / eps, 2)
+                    result["available"] = True
+
+                if price and total_equity and fdr_shares > 0:
+                    bps = total_equity / fdr_shares
+                    result["bps"] = round(bps, 2)
+                    if bps > 0:
+                        result["pbr"] = round(price / bps, 2)
+                    result["available"] = True
+
+                result["source"] = "yfinance_ks+fdr"
+            except Exception:
+                pass
+
     return result
 
 

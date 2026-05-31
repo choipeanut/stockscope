@@ -71,10 +71,31 @@ def _fetch_nasdaq_name(ticker: str) -> str:
         return ""
 
 
+def _fetch_kr_name(ticker: str) -> str:
+    """pykrx로 한국 종목명 조회. 실패 시 빈 문자열."""
+    try:
+        from pykrx import stock
+        name = stock.get_market_ticker_name(ticker)
+        return str(name) if name else ""
+    except Exception:
+        return ""
+
+
 def get_company_name(ticker: str, market: str) -> str:
     """종목 코드 → 회사명 반환. 조회 실패 시 빈 문자열."""
     if market == "KOSDAQ":
-        return _KOSDAQ_NAMES.get(ticker.upper(), "")
+        # 1) 정적 맵 우선 (빠름)
+        t = ticker.upper()
+        name = _KOSDAQ_NAMES.get(t, "")
+        if name:
+            return name
+        # 2) pykrx fallback (정적 맵에 없는 모든 한국 종목)
+        cached = _nasdaq_cache.get(t)
+        if cached and time.time() < cached[1]:
+            return cached[0]
+        name = _fetch_kr_name(t)
+        _nasdaq_cache[t] = (name, time.time() + _NASDAQ_TTL)
+        return name
 
     # NASDAQ (or unknown)
     t = ticker.upper()
