@@ -65,3 +65,25 @@ def _startup() -> None:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/debug/db")
+def debug_db() -> dict:
+    """DB 연결 상태 확인 (인증 불필요)."""
+    import os
+    db_url = os.environ.get("DATABASE_URL", "")
+    result = {
+        "db_type": "postgresql" if db_url else "sqlite",
+        "db_url_set": bool(db_url),
+        "db_url_prefix": db_url[:30] + "..." if db_url else None,
+    }
+    try:
+        from app.db.connection import get_conn, fetchone
+        with get_conn() as con:
+            row = fetchone(con, "SELECT COUNT(*) as cnt FROM users")
+            result["connection"] = "ok"
+            result["user_count"] = row["cnt"] if row else 0
+    except Exception as e:
+        result["connection"] = "error"
+        result["error"] = str(e)
+    return result
