@@ -51,6 +51,17 @@ app.include_router(macro_router)
 app.include_router(news_router)
 
 
+@app.on_event("startup")
+def _startup() -> None:
+    """서버 시작 시 DB 마이그레이션 실행."""
+    try:
+        from app.db.repo import migrate_add_realized_pnl
+        migrate_add_realized_pnl()
+        logging.getLogger(__name__).info("DB migration OK")
+    except Exception as e:
+        logging.getLogger(__name__).warning("DB migration warning: %s", e)
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}

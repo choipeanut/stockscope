@@ -39,14 +39,15 @@ CREATE TABLE IF NOT EXISTS holdings (
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    ts      TEXT NOT NULL,
-    ticker  TEXT NOT NULL,
-    market  TEXT NOT NULL,
-    side    TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
-    qty     REAL NOT NULL,
-    price   REAL NOT NULL
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    ts           TEXT NOT NULL,
+    ticker       TEXT NOT NULL,
+    market       TEXT NOT NULL,
+    side         TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+    qty          REAL NOT NULL,
+    price        REAL NOT NULL,
+    realized_pnl REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS watchlist (
@@ -110,13 +111,26 @@ def get_user_by_id(user_id: int) -> dict | None:
 # ── Account ───────────────────────────────────────────────────────────────────
 
 def get_account(user_id: int) -> dict:
-    with _conn() as con:
+    """계좌 조회. 없으면 초기 잔고로 자동 생성 (복구용)."""
+    con = sqlite3.connect(str(_DB_PATH))
+    con.row_factory = sqlite3.Row
+    con.executescript("PRAGMA foreign_keys = OFF;" + _SCHEMA)  # FK 비활성화 — user 레코드 없어도 account 생성 가능
+    try:
         row = con.execute(
             "SELECT * FROM account WHERE user_id=?", (user_id,)
         ).fetchone()
-    if not row:
-        raise ValueError(f"Account not found for user_id={user_id}")
-    return dict(row)
+        if not row:
+            con.execute(
+                "INSERT OR REPLACE INTO account (user_id, cash, base_currency) VALUES (?,?,'MULTI')",
+                (user_id, _INITIAL_CASH),
+            )
+            con.commit()
+            row = con.execute(
+                "SELECT * FROM account WHERE user_id=?", (user_id,)
+            ).fetchone()
+        return dict(row)
+    finally:
+        con.close()
 
 
 def update_cash(user_id: int, new_cash: float) -> None:
@@ -170,14 +184,15 @@ def delete_holding(user_id: int, ticker: str, market: str) -> None:
 # ── Transactions ──────────────────────────────────────────────────────────────
 
 def add_transaction(
-    user_id: int, ticker: str, market: str, side: str, qty: float, price: float
+    user_id: int, ticker: str, market: str, side: str,
+    qty: float, price: float, realized_pnl: float = 0.0,
 ) -> None:
     ts = datetime.now(timezone.utc).isoformat()
     with _conn() as con:
         con.execute(
-            "INSERT INTO transactions (user_id, ts, ticker, market, side, qty, price)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (user_id, ts, ticker, market, side, qty, price),
+            "INSERT INTO transactions (user_id, ts, ticker, market, side, qty, price, realized_pnl)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (user_id, ts, ticker, market, side, qty, price, realized_pnl),
         )
         con.commit()
 
@@ -189,6 +204,25 @@ def get_transactions(user_id: int, limit: int = 100) -> list[dict]:
             (user_id, limit),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_realized_pnl(user_id: int) -> float:
+    """유저의 누적 실현손익 합계 반환."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COALESCE(SUM(realized_pnl), 0) as total FROM transactions WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+    return float(row["total"]) if row else 0.0
+
+
+def migrate_add_realized_pnl() -> None:
+    """기존 DB에 realized_pnl 컬럼이 없으면 추가 (안전한 마이그레이션)."""
+    with _conn() as con:
+        cols = [r[1] for r in con.execute("PRAGMA table_info(transactions)").fetchall()]
+        if "realized_pnl" not in cols:
+            con.execute("ALTER TABLE transactions ADD COLUMN realized_pnl REAL NOT NULL DEFAULT 0")
+            con.commit()
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────

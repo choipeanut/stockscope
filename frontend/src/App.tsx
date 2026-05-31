@@ -23,10 +23,10 @@ const queryClient = new QueryClient({
 });
 
 const EXAMPLES = [
-  { ticker: "AAPL", market: "NASDAQ" as const },
-  { ticker: "MSFT", market: "NASDAQ" as const },
-  { ticker: "005930", market: "KOSDAQ" as const },
-  { ticker: "247540", market: "KOSDAQ" as const },
+  { ticker: "AAPL", market: "NASDAQ" as const, label: "AAPL · Apple" },
+  { ticker: "MSFT", market: "NASDAQ" as const, label: "MSFT · Microsoft" },
+  { ticker: "005930", market: "KOSDAQ" as const, label: "005930 · 삼성전자" },
+  { ticker: "247540", market: "KOSDAQ" as const, label: "247540 · 에코프로비엠" },
 ];
 
 function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ" | "NASDAQ" }) {
@@ -113,7 +113,7 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
                 color: "#9ca3af", padding: "4px 10px", margin: "0 4px", cursor: "pointer", fontSize: 13,
               }}
             >
-              {ex.ticker}
+              {ex.label}
             </button>
           ))}
         </div>
@@ -192,6 +192,7 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
                 <TradeForm
                   ticker={data.ticker}
                   market={data.market}
+                  name={data.name}
                   currentPrice={data.ohlcv.length > 0 ? data.ohlcv[data.ohlcv.length - 1].close : undefined}
                 />
               </div>

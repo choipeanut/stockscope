@@ -5,10 +5,11 @@ import { api } from "../api/client";
 interface Props {
   ticker: string;
   market: string;
+  name?: string;
   currentPrice?: number; // 원본 통화 (NASDAQ=USD, KOSDAQ=KRW)
 }
 
-export function TradeForm({ ticker, market, currentPrice }: Props) {
+export function TradeForm({ ticker, market, name, currentPrice }: Props) {
   const qc = useQueryClient();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [qty, setQty] = useState("1");
@@ -65,7 +66,8 @@ export function TradeForm({ ticker, market, currentPrice }: Props) {
       borderRadius: 12, padding: 20, color: "#f9fafb",
     }}>
       <h4 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 600 }}>
-        모의 투자 — {ticker} ({market})
+        모의 투자 — {name ? `${name} (${ticker})` : ticker}
+        <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400, marginLeft: 6 }}>{market}</span>
       </h4>
 
       {/* 환율 표시 (NASDAQ만) */}
@@ -123,13 +125,14 @@ export function TradeForm({ ticker, market, currentPrice }: Props) {
           type="number"
           value={qty}
           min="1"
-          onChange={(e) => setQty(e.target.value)}
+          step="1"
+          onChange={(e) => setQty(String(Math.max(1, Math.floor(Number(e.target.value)))))}
           style={{
             flex: 1, background: "#1f2937", border: "1px solid #374151",
             borderRadius: 6, color: "#f9fafb", padding: "8px 12px",
             fontSize: 15, outline: "none",
           }}
-          placeholder="수량"
+          placeholder="수량 (정수)"
         />
         <span style={{ color: "#6b7280", fontSize: 13 }}>주</span>
       </div>

@@ -9,8 +9,12 @@ import json
 import time
 import urllib.request
 
+import sqlite3
+
+from app.collectors.company_name import get_company_name
 from app.collectors.prices import get_ohlcv
 from app.db import repo
+from app.db.repo import _DB_PATH, _SCHEMA
 
 # 환율 캐시 (30분)
 _fx_cache: dict = {}
@@ -92,6 +96,15 @@ def _latest_price(ticker: str, market: str) -> float:
     return float(df["close"].iloc[-1])
 
 
+def _atomic_conn() -> sqlite3.Connection:
+    """단일 원자적 트랜잭션용 커넥션 반환."""
+    con = sqlite3.connect(str(_DB_PATH))
+    con.row_factory = sqlite3.Row
+    con.executescript(_SCHEMA)
+    repo.migrate_add_realized_pnl.__wrapped__(con) if hasattr(repo.migrate_add_realized_pnl, "__wrapped__") else None
+    return con
+
+
 def buy(ticker: str, market: str, qty: float, user_id: int) -> dict:
     if qty <= 0:
         raise TradeError("qty must be positive")
@@ -99,27 +112,67 @@ def buy(ticker: str, market: str, qty: float, user_id: int) -> dict:
     price_native = _latest_price(ticker, market)
     price_krw, fx_rate = _to_krw(price_native, market)
     cost = price_krw * qty
+    ts = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
 
-    account = repo.get_account(user_id)
-    if account["cash"] < cost:
-        raise TradeError(
-            f"잔고 부족: 필요 {cost:,.0f}원, 보유 {account['cash']:,.0f}원"
-        )
+    # 단일 DB 트랜잭션으로 원자성 보장
+    con = sqlite3.connect(str(_DB_PATH))
+    con.row_factory = sqlite3.Row
+    con.executescript("PRAGMA foreign_keys = OFF;" + _SCHEMA)  # FK 비활성화 후 테이블 생성
+    try:
+        with con:
+            # account 없으면 자동 복구
+            acct_row = con.execute(
+                "SELECT cash FROM account WHERE user_id=?", (user_id,)
+            ).fetchone()
+            if acct_row is None:
+                con.execute(
+                    "INSERT OR REPLACE INTO account (user_id, cash, base_currency) VALUES (?,?,'MULTI')",
+                    (user_id, repo._INITIAL_CASH),
+                )
+                acct_row = con.execute(
+                    "SELECT cash FROM account WHERE user_id=?", (user_id,)
+                ).fetchone()
+            if acct_row is None:
+                raise TradeError(f"계좌 초기화 실패: user_id={user_id}. 다시 로그인해주세요.")
+            acct = dict(acct_row)
 
-    repo.update_cash(user_id, account["cash"] - cost)
+            if acct["cash"] < cost:
+                raise TradeError(
+                    f"잔고 부족: 필요 {cost:,.0f}원, 보유 {acct['cash']:,.0f}원"
+                )
 
-    existing = repo.get_holding(user_id, ticker, market)
-    if existing:
-        old_qty = existing["qty"]
-        old_avg = existing["avg_price"]
-        new_qty = old_qty + qty
-        new_avg = (old_qty * old_avg + qty * price_krw) / new_qty
-    else:
-        new_qty = qty
-        new_avg = price_krw
+            existing = con.execute(
+                "SELECT qty, avg_price FROM holdings WHERE user_id=? AND ticker=? AND market=?",
+                (user_id, ticker, market),
+            ).fetchone()
 
-    repo.upsert_holding(user_id, ticker, market, new_qty, new_avg)
-    repo.add_transaction(user_id, ticker, market, "BUY", qty, price_krw)
+            if existing:
+                old_qty = existing["qty"]
+                old_avg = existing["avg_price"]
+                new_qty = old_qty + qty
+                new_avg = (old_qty * old_avg + qty * price_krw) / new_qty
+            else:
+                new_qty = qty
+                new_avg = price_krw
+
+            con.execute(
+                "UPDATE account SET cash=? WHERE user_id=?",
+                (acct["cash"] - cost, user_id),
+            )
+            con.execute(
+                """INSERT INTO holdings (user_id, ticker, market, qty, avg_price)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(user_id, ticker, market)
+                   DO UPDATE SET qty=excluded.qty, avg_price=excluded.avg_price""",
+                (user_id, ticker, market, new_qty, new_avg),
+            )
+            con.execute(
+                "INSERT INTO transactions (user_id, ts, ticker, market, side, qty, price, realized_pnl)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (user_id, ts, ticker, market, "BUY", qty, price_krw, 0.0),
+            )
+    finally:
+        con.close()
 
     result = {
         "ticker": ticker,
@@ -131,7 +184,7 @@ def buy(ticker: str, market: str, qty: float, user_id: int) -> dict:
         "cost": round(cost, 0),
         "avg_price": round(new_avg, 0),
         "new_qty": new_qty,
-        "cash_remaining": round(account["cash"] - cost, 0),
+        "cash_remaining": round(acct["cash"] - cost, 0),
     }
     if fx_rate:
         result["fx_rate"] = fx_rate
@@ -145,29 +198,71 @@ def sell(ticker: str, market: str, qty: float, user_id: int) -> dict:
     if qty <= 0:
         raise TradeError("qty must be positive")
 
-    existing = repo.get_holding(user_id, ticker, market)
-    if not existing:
-        raise TradeError(f"{ticker}/{market} 보유 없음")
-    if existing["qty"] < qty:
-        raise TradeError(
-            f"보유 수량 부족: 보유 {existing['qty']}주, 매도 요청 {qty}주"
-        )
-
     price_native = _latest_price(ticker, market)
     price_krw, fx_rate = _to_krw(price_native, market)
-    proceeds = price_krw * qty
-    realized_pnl = (price_krw - existing["avg_price"]) * qty
+    ts = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
 
-    account = repo.get_account(user_id)
-    repo.update_cash(user_id, account["cash"] + proceeds)
+    con = sqlite3.connect(str(_DB_PATH))
+    con.row_factory = sqlite3.Row
+    con.executescript("PRAGMA foreign_keys = OFF;" + _SCHEMA)  # FK 비활성화 후 테이블 생성
+    try:
+        with con:
+            existing = con.execute(
+                "SELECT qty, avg_price FROM holdings WHERE user_id=? AND ticker=? AND market=?",
+                (user_id, ticker, market),
+            ).fetchone()
+            if not existing:
+                raise TradeError(f"{ticker}/{market} 보유 없음")
+            if existing["qty"] < qty - 1e-9:
+                raise TradeError(
+                    f"보유 수량 부족: 보유 {existing['qty']}주, 매도 요청 {qty}주"
+                )
 
-    new_qty = existing["qty"] - qty
-    if new_qty < 1e-9:
-        repo.delete_holding(user_id, ticker, market)
-    else:
-        repo.upsert_holding(user_id, ticker, market, new_qty, existing["avg_price"])
+            proceeds = price_krw * qty
+            realized_pnl = (price_krw - existing["avg_price"]) * qty
 
-    repo.add_transaction(user_id, ticker, market, "SELL", qty, price_krw)
+            acct_row = con.execute(
+                "SELECT cash FROM account WHERE user_id=?", (user_id,)
+            ).fetchone()
+            if acct_row is None:
+                con.execute(
+                    "INSERT OR REPLACE INTO account (user_id, cash, base_currency) VALUES (?,?,'MULTI')",
+                    (user_id, repo._INITIAL_CASH),
+                )
+                acct_row = con.execute(
+                    "SELECT cash FROM account WHERE user_id=?", (user_id,)
+                ).fetchone()
+            if acct_row is None:
+                raise TradeError(f"계좌 초기화 실패: user_id={user_id}. 다시 로그인해주세요.")
+            acct = dict(acct_row)
+
+            con.execute(
+                "UPDATE account SET cash=? WHERE user_id=?",
+                (acct["cash"] + proceeds, user_id),
+            )
+
+            new_qty = existing["qty"] - qty
+            if new_qty < 1e-9:
+                con.execute(
+                    "DELETE FROM holdings WHERE user_id=? AND ticker=? AND market=?",
+                    (user_id, ticker, market),
+                )
+            else:
+                con.execute(
+                    """INSERT INTO holdings (user_id, ticker, market, qty, avg_price)
+                       VALUES (?,?,?,?,?)
+                       ON CONFLICT(user_id, ticker, market)
+                       DO UPDATE SET qty=excluded.qty, avg_price=excluded.avg_price""",
+                    (user_id, ticker, market, new_qty, existing["avg_price"]),
+                )
+
+            con.execute(
+                "INSERT INTO transactions (user_id, ts, ticker, market, side, qty, price, realized_pnl)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (user_id, ts, ticker, market, "SELL", qty, price_krw, realized_pnl),
+            )
+    finally:
+        con.close()
 
     result = {
         "ticker": ticker,
@@ -180,7 +275,7 @@ def sell(ticker: str, market: str, qty: float, user_id: int) -> dict:
         "realized_pnl": round(realized_pnl, 0),
         "avg_price": round(existing["avg_price"], 0),
         "new_qty": new_qty,
-        "cash_after": round(account["cash"] + proceeds, 0),
+        "cash_after": round(acct["cash"] + proceeds, 0),
     }
     if fx_rate:
         result["fx_rate"] = fx_rate
@@ -213,6 +308,7 @@ def get_portfolio(user_id: int) -> dict:
         item = {
             "ticker": h["ticker"],
             "market": h["market"],
+            "name": get_company_name(h["ticker"], h["market"]),
             "qty": h["qty"],
             "avg_price": h["avg_price"],
             "current_price": round(price_krw, 0),
@@ -229,6 +325,8 @@ def get_portfolio(user_id: int) -> dict:
 
         holdings.append(item)
 
+    realized_pnl_total = repo.get_realized_pnl(user_id)
+
     return {
         "cash": round(account["cash"], 0),
         "base_currency": "KRW",
@@ -237,5 +335,7 @@ def get_portfolio(user_id: int) -> dict:
         "totals": {
             "positions_value": round(total_value, 0),
             "total_assets": round(account["cash"] + total_value, 0),
+            "unrealized_pnl": round(sum(h["unrealized_pnl"] for h in holdings), 0),
+            "realized_pnl": round(realized_pnl_total, 0),
         },
     }

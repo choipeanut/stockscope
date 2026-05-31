@@ -1,22 +1,30 @@
-import type { AnalyzeResponse } from "../api/client";
+import type { AnalyzeResponse, MarketSentimentDetail } from "../api/client";
 import { FreshnessBadge } from "./FreshnessBadge";
 
 const FACTOR_LABELS: Record<string, string> = {
-  fundamental: "펀더멘털",
-  valuation: "밸류에이션",
-  supply_demand: "수급",
-  momentum: "모멘텀",
-  macro: "거시환경",
-  risk: "리스크",
+  fundamental:      "펀더멘털",
+  valuation:        "밸류에이션",
+  supply_demand:    "수급",
+  momentum:         "모멘텀",
+  macro:            "거시환경",
+  risk:             "리스크",
+  market_sentiment: "시장 환경",
+  analyst:          "애널리스트",
+  insider:          "내부자거래",
+  options:          "옵션심리",
 };
 
 const FACTOR_WEIGHTS: Record<string, number> = {
-  fundamental: 30,
-  valuation: 20,
-  supply_demand: 15,
-  momentum: 15,
-  macro: 10,
-  risk: 10,
+  fundamental:      22,
+  valuation:        15,
+  supply_demand:    11,
+  momentum:         11,
+  macro:             8,
+  risk:              8,
+  market_sentiment:  7,
+  analyst:           8,
+  insider:           6,
+  options:           4,
 };
 
 function scoreColor(score: number): string {
@@ -62,6 +70,97 @@ function FactorBar({ name, score, weight, unavailable }: FactorBarProps) {
   );
 }
 
+function MarketSentimentCard({ detail }: { detail: MarketSentimentDetail }) {
+  const trend = detail.market_trend ?? "neutral";
+  const trendColor =
+    trend === "bullish" ? "#22c55e" : trend === "bearish" ? "#ef4444" : "#6b7280";
+  const trendBg =
+    trend === "bullish" ? "#052e16" : trend === "bearish" ? "#2d0a0a" : "#1a1f2e";
+  const trendLabel =
+    trend === "bullish" ? "강세 📈" : trend === "bearish" ? "약세 📉" : "중립 ➖";
+  const confidenceLabel =
+    detail.confidence === "high" ? "높음" : detail.confidence === "medium" ? "보통" : "낮음";
+
+  return (
+    <div style={{
+      background: detail.available ? trendBg : "#1a1f2e",
+      border: `1px solid ${detail.available ? trendColor : "#374151"}`,
+      borderRadius: 10, padding: "14px 16px", marginBottom: 20,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#e5e7eb" }}>
+          🌐 전체 시장 환경
+        </span>
+        {detail.available ? (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "#9ca3af", background: "#1f2937", borderRadius: 4, padding: "2px 6px" }}>
+              신뢰도 {confidenceLabel}
+            </span>
+            <span style={{
+              fontSize: 13, fontWeight: 700, color: trendColor,
+              background: `${trendColor}22`, borderRadius: 6,
+              padding: "3px 10px", border: `1px solid ${trendColor}44`,
+            }}>
+              {trendLabel}
+            </span>
+          </div>
+        ) : (
+          <span style={{ fontSize: 12, color: "#6b7280" }}>NEWSAPI_KEY 필요</span>
+        )}
+      </div>
+
+      {detail.available && detail.market_score !== null && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12, marginBottom: 10,
+          background: "#0f172a", borderRadius: 8, padding: "10px 14px",
+        }}>
+          <div style={{ textAlign: "center", minWidth: 60 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>시장 점수</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: trendColor }}>
+              {detail.market_score}
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ background: "#1f2937", borderRadius: 4, height: 8 }}>
+              <div style={{
+                width: `${detail.market_score}%`, height: "100%",
+                background: trendColor, borderRadius: 4,
+                transition: "width 0.4s ease",
+              }} />
+            </div>
+            {detail.summary && (
+              <div style={{ fontSize: 12, color: "#d1d5db", marginTop: 8, lineHeight: 1.5 }}>
+                {detail.summary}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {detail.available && (detail.key_themes?.length ?? 0) > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {detail.key_themes.map((theme, i) => (
+            <span key={i} style={{
+              fontSize: 11, color: trendColor,
+              background: `${trendColor}15`,
+              border: `1px solid ${trendColor}33`,
+              borderRadius: 4, padding: "2px 8px",
+            }}>
+              {theme}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {!detail.available && (
+        <div style={{ fontSize: 12, color: "#6b7280" }}>
+          NEWSAPI_KEY 설정 시 글로벌 시장 환경이 예측에 반영됩니다.
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   data: AnalyzeResponse;
 }
@@ -69,7 +168,8 @@ interface Props {
 export function ScoreCard({ data }: Props) {
   const {
     composite, composite_raw, sentiment_delta, sentiment,
-    factors, unavailable, renormalized, as_of, ticker, market, notice,
+    factors, unavailable, renormalized, as_of, ticker, market, name, notice,
+    market_sentiment_detail,
   } = data;
 
   const s = sentiment?.sentiment ?? "neutral";
@@ -92,9 +192,14 @@ export function ScoreCard({ data }: Props) {
       {/* ── 헤더: 종목명 + 타임스탬프 ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
+          {name && (
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#f9fafb", marginBottom: 2 }}>
+              {name}
+            </div>
+          )}
+          <h2 style={{ margin: 0, fontSize: name ? 14 : 22, fontWeight: name ? 400 : 700, color: name ? "#9ca3af" : "#f9fafb" }}>
             {ticker}{" "}
-            <span style={{ fontSize: 14, color: "#6b7280", fontWeight: 400 }}>{market}</span>
+            <span style={{ fontSize: name ? 13 : 14, color: "#6b7280", fontWeight: 400 }}>{market}</span>
           </h2>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
             <span>{new Date(as_of).toLocaleString("ko-KR")}</span>
@@ -209,6 +314,11 @@ export function ScoreCard({ data }: Props) {
           </div>
         )}
       </div>
+
+      {/* ── 전체 시장 환경 카드 ── */}
+      {market_sentiment_detail && (
+        <MarketSentimentCard detail={market_sentiment_detail} />
+      )}
 
       {/* ── 팩터 재정규화 알림 ── */}
       {renormalized && (

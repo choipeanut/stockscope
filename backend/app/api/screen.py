@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query
 
+from app.collectors.company_name import get_company_name
 from app.collectors.universe import get_universe
 from app.services.screener import _safe_score_ticker
 
@@ -44,8 +45,8 @@ def _run_background(market_filter: str | None) -> None:
     pool = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
     try:
         future_map = {
-            # 90일치 OHLCV — 데이터 적어 yfinance 응답 빠름
-            pool.submit(_safe_score_ticker, item["ticker"], item["market"], 90): item
+            # 365일치 OHLCV — analyze와 동일 기간으로 점수 일관성 확보
+            pool.submit(_safe_score_ticker, item["ticker"], item["market"], 365): item
             for item in tickers
         }
         done, not_done = cf_wait(future_map.keys(), timeout=_WALL_TIMEOUT)
@@ -67,7 +68,8 @@ def _run_background(market_filter: str | None) -> None:
             if result is None or result.get("composite") is None:
                 continue
 
-            result["name"] = item.get("name", "")
+            # universe name 우선, 없으면 yfinance 조회 (NASDAQ)
+            result["name"] = item.get("name", "") or get_company_name(item["ticker"], item["market"])
             results.append(result)
     finally:
         pool.shutdown(wait=False)
@@ -191,6 +193,16 @@ def debug_score(ticker: str = "AAPL", market: str = "NASDAQ") -> dict:
         except Exception as e:
             factor_scores[name] = None
             steps[name] = f"FAIL: {e}"
+
+    try:
+        from app.collectors.news_macro import get_global_market_news
+        from app.services.macro_sentiment import analyze_market_sentiment
+        ms = analyze_market_sentiment(get_global_market_news(limit_per_category=4))
+        factor_scores["market_sentiment"] = float(ms["market_score"]) if ms.get("available") else None
+        steps["market_sentiment"] = "ok" if ms.get("available") else f"unavailable: {ms.get('reason','')}"
+    except Exception as e:
+        factor_scores["market_sentiment"] = None
+        steps["market_sentiment"] = f"FAIL: {e}"
 
     composite = compute_composite(factor_scores, as_of=datetime.now(timezone.utc).isoformat())
     steps["composite"] = composite.composite

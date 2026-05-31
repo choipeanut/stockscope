@@ -29,6 +29,15 @@ _MACRO_QUERY = (
     " stock market S&P NASDAQ"
 )
 
+# 글로벌 시장 전반 분석용 카테고리 쿼리 (ticker 무관)
+_GLOBAL_QUERIES = [
+    "Federal Reserve interest rate monetary policy central bank",
+    "US China trade war tariff geopolitical sanctions",
+    "inflation CPI GDP unemployment recession economy",
+    "stock market VIX volatility investor sentiment rally",
+    "S&P 500 NASDAQ earnings corporate guidance outlook",
+]
+
 
 def _fetch(query: str, api_key: str, limit: int = 5) -> list[dict]:
     """NewsAPI /everything 호출."""
@@ -97,3 +106,27 @@ def get_macro_news(ticker: str, market: str, limit: int = 5) -> list[dict]:
             unique.append(item)
 
     return unique[:limit * 2]
+
+
+def get_global_market_news(limit_per_category: int = 4) -> list[dict]:
+    """
+    글로벌 시장 전반 뉴스 수집 (ticker 무관).
+    5개 카테고리에서 수집 후 중복 제거하여 반환.
+    NEWSAPI_KEY 없으면 빈 리스트.
+    """
+    api_key = os.environ.get("NEWSAPI_KEY")
+    if not api_key:
+        return []
+
+    results: list[dict] = []
+    for query in _GLOBAL_QUERIES:
+        results.extend(_fetch(query, api_key, limit=limit_per_category))
+
+    seen: set[str] = set()
+    unique = []
+    for item in results:
+        if item["url"] not in seen:
+            seen.add(item["url"])
+            unique.append(item)
+
+    return unique

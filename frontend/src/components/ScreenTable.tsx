@@ -247,7 +247,7 @@ export function ScreenTable({ onDrillDown }: Props) {
                     )}
                     {row.unavailable.length > 0 && (
                       <span style={{ fontSize: 10, color: "#92400e", marginLeft: 4 }}>
-                        ({6 - row.unavailable.length}/6)
+                        ({7 - row.unavailable.length}/7)
                       </span>
                     )}
                   </td>

@@ -8,19 +8,28 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 
+from app.collectors.analyst import get_analyst_data
+from app.collectors.company_name import get_company_name
 from app.collectors.flows import get_flows
 from app.collectors.fundamentals import get_fundamentals
+from app.collectors.insider import get_insider_data
 from app.collectors.macro import get_macro
+from app.collectors.news_macro import get_global_market_news
+from app.collectors.options_data import get_options_data
 from app.collectors.prices import get_ohlcv
 from app.collectors.risk import get_risk
 from app.collectors.valuation import get_valuation
+from app.scoring.analyst import compute_analyst
 from app.scoring.composite import compute_composite
 from app.scoring.fundamental import compute_fundamental
+from app.scoring.insider import compute_insider
 from app.scoring.macro_score import compute_macro
 from app.scoring.momentum import compute_momentum
+from app.scoring.options_score import compute_options
 from app.scoring.risk import compute_risk
 from app.scoring.supply_demand import compute_supply_demand
 from app.scoring.valuation import compute_valuation
+from app.services.macro_sentiment import analyze_market_sentiment
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +60,18 @@ def _score_or_none(score: float) -> float | None:
     if isinstance(score, float) and (math.isnan(score) or math.isinf(score)):
         return None
     return score
+
+
+def _get_market_sentiment_score() -> float | None:
+    """글로벌 시장 감성 점수 반환 (1시간 캐시 활용, 티커별 호출 無)."""
+    try:
+        news = get_global_market_news(limit_per_category=4)
+        result = analyze_market_sentiment(news)
+        if result.get("available"):
+            return float(result["market_score"])
+    except Exception:
+        pass
+    return None
 
 
 def _safe_score_ticker(ticker: str, market: str, period_days: int = 365) -> dict | None:
@@ -99,13 +120,33 @@ def _safe_score_ticker(ticker: str, market: str, period_days: int = 365) -> dict
     except Exception:
         risk_data, risk_result = {}, None
 
+    try:
+        analyst_result = compute_analyst(get_analyst_data(ticker, market))
+    except Exception:
+        analyst_result = None
+
+    try:
+        insider_result = compute_insider(get_insider_data(ticker, market))
+    except Exception:
+        insider_result = None
+
+    try:
+        # 스크리너에서는 옵션 1개 만기만 조회 (속도 최적화)
+        options_result = compute_options(get_options_data(ticker, market, max_expirations=1))
+    except Exception:
+        options_result = None
+
     factor_scores: dict[str, float | None] = {
-        "fundamental": _score_or_none(fund_result.score) if fund_result else None,
-        "valuation": _score_or_none(val_result.score) if val_result else None,
-        "supply_demand": _score_or_none(sd_result.score) if sd_result else None,
-        "momentum": _score_or_none(momentum.score) if momentum else None,
-        "macro": _score_or_none(macro_result.score) if macro_result else None,
-        "risk": _score_or_none(risk_result.score) if risk_result else None,
+        "fundamental":      _score_or_none(fund_result.score) if fund_result else None,
+        "valuation":        _score_or_none(val_result.score) if val_result else None,
+        "supply_demand":    _score_or_none(sd_result.score) if sd_result else None,
+        "momentum":         _score_or_none(momentum.score) if momentum else None,
+        "macro":            _score_or_none(macro_result.score) if macro_result else None,
+        "risk":             _score_or_none(risk_result.score) if risk_result else None,
+        "market_sentiment": _get_market_sentiment_score(),
+        "analyst":          _score_or_none(analyst_result.score) if analyst_result else None,
+        "insider":          _score_or_none(insider_result.score) if insider_result else None,
+        "options":          _score_or_none(options_result.score) if options_result else None,
     }
 
     composite = compute_composite(factor_scores, as_of=as_of)
@@ -176,7 +217,9 @@ def run_screen(
             if result["composite"] < min_composite:
                 continue
 
-            result["name"] = item.get("name", "")
+            # universe에 name이 있으면 사용, 없으면 lookup
+            name = item.get("name", "") or get_company_name(item["ticker"], item["market"])
+            result["name"] = name
             results.append(result)
 
     results.sort(key=lambda r: r["composite"] or 0, reverse=True)

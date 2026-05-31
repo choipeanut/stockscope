@@ -147,13 +147,14 @@ def get_news(ticker: str, market: str, limit: int = 10) -> dict:
         disclosures = _fetch_dart_disclosures(ticker, limit)
         news = _fetch_yf_news(ticker, min(5, limit))
 
-    # 거시 환경 뉴스 (NewsAPI)
+    # 거시 환경 뉴스 (NewsAPI) — 화면 표시용만, 감성 분석에는 넣지 않음
+    # (시장 전반 영향은 market_sentiment 팩터에서 별도 처리)
     from app.collectors.news_macro import get_macro_news
     macro_news = get_macro_news(ticker, market, limit=5)
 
-    # 감성 분석 (Claude) — 종목 뉴스 + 거시 뉴스 합산
+    # 감성 분석 (Claude) — 종목 직접 뉴스 + 공시만 분석
     from app.services.sentiment import analyze_sentiment
-    sentiment = analyze_sentiment(ticker, market, news, disclosures, macro_news=macro_news)
+    sentiment = analyze_sentiment(ticker, market, news, disclosures)
 
     result = {
         "ticker": ticker,

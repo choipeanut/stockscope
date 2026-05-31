@@ -1,15 +1,16 @@
 """Composite scorer.
 
-Full weights (ANALYSIS_SPEC):
-  fundamental 0.30 | valuation 0.20 | supply_demand 0.15
-  momentum    0.15 | macro     0.10 | risk         0.10
+Full weights (10-factor):
+  fundamental 0.22 | valuation 0.15 | supply_demand 0.11
+  momentum    0.11 | macro     0.08 | risk         0.08
+  market_sentiment 0.07 | analyst 0.08 | insider 0.06 | options 0.04
 
 Data-coverage confidence penalty:
   핵심 팩터(fundamental+valuation)가 없을수록 composite에 할인 적용.
   신뢰도 = 0.55 + 0.45 * (가용_팩터_가중치 합계)
-  - 6/6 팩터 (weight=1.00) → 신뢰도 1.00 → 패널티 없음
-  - 4/6 팩터 (weight=0.55) → 신뢰도 0.80 → 20% 감점
-  - 모멘텀+매크로+리스크만 (weight=0.35) → 신뢰도 0.71 → 29% 감점
+  - 10/10 팩터 (weight=1.00) → 신뢰도 1.00 → 패널티 없음
+  - 7/10 팩터 (weight≈0.72) → 신뢰도 0.87 → 13% 감점
+  - 기본 4팩터만 (weight≈0.42) → 신뢰도 0.74 → 26% 감점
 """
 from __future__ import annotations
 
@@ -19,12 +20,16 @@ from typing import Any
 import numpy as np
 
 FULL_WEIGHTS: dict[str, float] = {
-    "fundamental": 0.30,
-    "valuation": 0.20,
-    "supply_demand": 0.15,
-    "momentum": 0.15,
-    "macro": 0.10,
-    "risk": 0.10,
+    "fundamental":      0.22,
+    "valuation":        0.15,
+    "supply_demand":    0.11,
+    "momentum":         0.11,
+    "macro":            0.08,
+    "risk":             0.08,
+    "market_sentiment": 0.07,
+    "analyst":          0.08,
+    "insider":          0.06,
+    "options":          0.04,
 }
 
 

@@ -43,6 +43,19 @@ export interface FactorScores {
   momentum: number | null;
   macro: number | null;
   risk: number | null;
+  market_sentiment: number | null;
+  analyst: number | null;
+  insider: number | null;
+  options: number | null;
+}
+
+export interface MarketSentimentDetail {
+  market_score: number | null;
+  market_trend: "bullish" | "bearish" | "neutral" | null;
+  confidence: "high" | "medium" | "low" | null;
+  summary: string;
+  key_themes: string[];
+  available: boolean;
 }
 
 export interface MomentumDetail {
@@ -71,6 +84,7 @@ export interface SupplyDemandDetail {
 export interface AnalyzeResponse {
   ticker: string;
   market: string;
+  name: string;
   as_of: string;
   composite: number | null;
   composite_raw: number | null;
@@ -85,6 +99,40 @@ export interface AnalyzeResponse {
   supply_demand_detail: SupplyDemandDetail;
   macro_detail: MacroDetail;
   risk_detail: { penalties: Record<string, number>; partial: boolean; components?: Record<string, number | null> };
+  market_sentiment_detail: MarketSentimentDetail;
+  analyst_detail: {
+    mean_target: number | null;
+    current_price: number | null;
+    upside_pct: number | null;
+    strong_buy: number;
+    buy: number;
+    hold: number;
+    sell: number;
+    strong_sell: number;
+    num_analysts: number;
+    upgrades_3m: number;
+    downgrades_3m: number;
+    available: boolean;
+    components: Record<string, number>;
+  };
+  insider_detail: {
+    buy_count: number;
+    sell_count: number;
+    buy_value: number | null;
+    sell_value: number | null;
+    net_value: number | null;
+    available: boolean;
+    components: Record<string, number>;
+  };
+  options_detail: {
+    put_call_volume_ratio: number | null;
+    put_call_oi_ratio: number | null;
+    avg_iv: number | null;
+    call_volume: number;
+    put_volume: number;
+    available: boolean;
+    components: Record<string, number>;
+  };
   scenarios: Scenario[];
   ohlcv: OhlcvRow[];
   notice: string;
