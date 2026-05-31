@@ -116,39 +116,127 @@ CREATE TABLE IF NOT EXISTS watchlist (
 """
 
 
-def _pg_conn():
-    """psycopg2 연결 반환 (IPv4 강제 + Supabase SSL)."""
+# 성공한 연결 설정 캐싱 (재탐색 방지)
+_resolved_conn: dict | None = None
+
+# Supabase 풀러 region 후보 (IPv4 지원). 순차 시도.
+_SUPABASE_REGIONS = [
+    "ap-northeast-2",  # Seoul
+    "ap-northeast-1",  # Tokyo
+    "ap-southeast-1",  # Singapore
+    "us-east-1",
+    "us-west-1",
+    "us-east-2",
+    "eu-central-1",
+    "eu-west-1",
+    "ap-southeast-2",  # Sydney
+    "ap-south-1",      # Mumbai
+    "sa-east-1",
+]
+
+
+def _extract_supabase_ref(hostname: str, username: str) -> str | None:
+    """Supabase 프로젝트 ref 추출.
+    direct:  db.{ref}.supabase.co
+    pooler:  user = postgres.{ref}
+    """
+    if hostname and ".supabase.co" in hostname and hostname.startswith("db."):
+        return hostname[len("db."):].split(".supabase.co")[0]
+    if username and username.startswith("postgres."):
+        return username.split("postgres.", 1)[1]
+    return None
+
+
+def _build_pooler_candidates(parsed, password: str) -> list[dict]:
+    """프로젝트 ref로 여러 region 풀러 연결 설정 후보 생성."""
+    ref = _extract_supabase_ref(parsed.hostname or "", parsed.username or "")
+    if not ref:
+        return []
+    candidates = []
+    for region in _SUPABASE_REGIONS:
+        for prefix in ("aws-0", "aws-1"):
+            candidates.append({
+                "host": f"{prefix}-{region}.pooler.supabase.com",
+                "port": 6543,  # transaction mode
+                "dbname": "postgres",
+                "user": f"postgres.{ref}",
+                "password": password,
+            })
+    return candidates
+
+
+def _try_connect(cfg: dict):
+    """단일 설정으로 연결 시도 (IPv4 강제). 실패 시 None."""
     import socket
     import psycopg2
     import psycopg2.extras
+
+    host = cfg["host"]
+    # IPv4 강제 (Render 무료 플랜 IPv6 미지원)
+    try:
+        ipv4 = socket.getaddrinfo(host, cfg["port"], socket.AF_INET, socket.SOCK_STREAM)
+        if ipv4:
+            host = ipv4[0][4][0]
+    except Exception:
+        return None  # IPv4 resolve 실패 → 이 host는 건너뜀
+
+    try:
+        return psycopg2.connect(
+            host=host,
+            port=cfg["port"],
+            dbname=cfg["dbname"],
+            user=cfg["user"],
+            password=cfg["password"],
+            sslmode="require",
+            connect_timeout=8,
+            cursor_factory=psycopg2.extras.RealDictCursor,
+        )
+    except Exception:
+        return None
+
+
+def _pg_conn():
+    """psycopg2 연결 반환. 첫 호출 시 여러 풀러 region 자동 탐색 후 캐싱."""
+    global _resolved_conn
     from urllib.parse import urlparse, unquote
 
     url = _DATABASE_URL
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
-
     parsed = urlparse(url)
-    hostname = parsed.hostname
-    port = parsed.port or 5432
+    password = unquote(parsed.password or "")
 
-    # IPv4 주소로 강제 변환 (Render 무료 플랜 IPv6 미지원 우회)
-    try:
-        ipv4_list = socket.getaddrinfo(hostname, port, socket.AF_INET, socket.SOCK_STREAM)
-        if ipv4_list:
-            hostname = ipv4_list[0][4][0]
-    except Exception:
-        pass  # 실패 시 원래 hostname 사용
+    # 이미 성공한 설정이 있으면 그것만 사용
+    if _resolved_conn is not None:
+        con = _try_connect(_resolved_conn)
+        if con is not None:
+            return con
+        _resolved_conn = None  # 캐시 무효화 후 재탐색
 
-    con = psycopg2.connect(
-        host=hostname,
-        port=port,
-        dbname=parsed.path.lstrip("/"),
-        user=parsed.username,
-        password=unquote(parsed.password or ""),
-        sslmode="require",
-        cursor_factory=psycopg2.extras.RealDictCursor,
+    # 1) 사용자가 넣은 URL 그대로 시도 (이미 풀러 URL일 수 있음)
+    direct_cfg = {
+        "host": parsed.hostname,
+        "port": parsed.port or 5432,
+        "dbname": parsed.path.lstrip("/") or "postgres",
+        "user": parsed.username,
+        "password": password,
+    }
+    con = _try_connect(direct_cfg)
+    if con is not None:
+        _resolved_conn = direct_cfg
+        return con
+
+    # 2) 여러 region 풀러 자동 시도
+    for cfg in _build_pooler_candidates(parsed, password):
+        con = _try_connect(cfg)
+        if con is not None:
+            _resolved_conn = cfg
+            return con
+
+    raise RuntimeError(
+        "PostgreSQL 연결 실패: direct + 모든 풀러 region 시도 실패. "
+        "DATABASE_URL 또는 비밀번호를 확인하세요."
     )
-    return con
 
 
 def _sqlite_conn() -> sqlite3.Connection:

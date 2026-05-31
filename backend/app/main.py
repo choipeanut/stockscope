@@ -79,10 +79,17 @@ def debug_db() -> dict:
     }
     try:
         from app.db.connection import get_conn, fetchone
+        import app.db.connection as conn_mod
         with get_conn() as con:
             row = fetchone(con, "SELECT COUNT(*) as cnt FROM users")
             result["connection"] = "ok"
             result["user_count"] = row["cnt"] if row else 0
+            # 어떤 풀러 설정으로 연결됐는지 (비밀번호 제외)
+            rc = conn_mod._resolved_conn
+            if rc:
+                result["resolved_host"] = rc.get("host")
+                result["resolved_port"] = rc.get("port")
+                result["resolved_user"] = rc.get("user")
     except Exception as e:
         result["connection"] = "error"
         result["error"] = str(e)
