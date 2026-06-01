@@ -113,7 +113,7 @@ def _run_predict_eval(key, market_filter, years, rebalance_days, holding_days, n
         _store[key] = {"status": "ok", "payload": payload, "ts": time.time()}
         logger.info("[predict/eval] done: %s", key)
     except Exception as e:
-        logger.warning("[predict/eval] failed: %s", e)
+        logger.warning("[predict/eval] failed: %s", e, exc_info=True)
         _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
 
 
@@ -207,7 +207,7 @@ def _run_predict(key, market_filter, years, holding_days, limit):
         _store[key] = {"status": "ok", "payload": payload, "ts": time.time()}
         logger.info("[predict] done: %d preds", len(preds))
     except Exception as e:
-        logger.warning("[predict] failed: %s", e)
+        logger.warning("[predict] failed: %s", e, exc_info=True)
         _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
 
 
