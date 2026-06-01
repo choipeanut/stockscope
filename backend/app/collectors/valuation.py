@@ -110,13 +110,17 @@ def _get_kr_valuation(ticker: str) -> dict:
 
 
 def _try_pykrx_valuation(ticker: str) -> dict:
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    import os
     result: dict = {
         "per": None, "pbr": None, "dividend_yield": None,
         "psr": None, "ev_ebitda": None, "per_5y_pct": None,
         "eps": None, "bps": None, "roe": None,
-        "source": "pykrx", "available": True,
+        "source": "pykrx", "available": False,
     }
+    if not (os.environ.get("KRX_ID") and os.environ.get("KRX_PW")):
+        return result
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    result["available"] = True
     try:
         from pykrx import stock as pykrx_stock
         df = pykrx_stock.get_market_fundamental(today, today, ticker)
