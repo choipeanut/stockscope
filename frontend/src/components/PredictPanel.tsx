@@ -33,18 +33,21 @@ export function PredictPanel({ onDrillDown }: Props) {
   const [horizon, setHorizon] = useState(21);
   const [triggered, setTriggered] = useState(false);
 
-  const predict = useQuery({
-    queryKey: ["predict", market, horizon],
-    queryFn: () => fetchPredict(market || undefined, horizon),
+  // Eval runs first; it builds & caches the dataset. Predict runs only after
+  // eval settles, so it reuses the cached dataset instead of doing the heavy
+  // multi-year fetch a second time (which timed out on the small server).
+  const evalQ = useQuery({
+    queryKey: ["predict-eval", market, horizon],
+    queryFn: () => fetchPredictEval(market || undefined, horizon),
     enabled: triggered,
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
-  const evalQ = useQuery({
-    queryKey: ["predict-eval", market, horizon],
-    queryFn: () => fetchPredictEval(market || undefined, horizon),
-    enabled: triggered,
+  const predict = useQuery({
+    queryKey: ["predict", market, horizon],
+    queryFn: () => fetchPredict(market || undefined, horizon),
+    enabled: triggered && !evalQ.isFetching && evalQ.isSuccess,
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
@@ -85,7 +88,7 @@ export function PredictPanel({ onDrillDown }: Props) {
         <button
           onClick={() => {
             setTriggered(true);
-            predict.refetch();
+            // eval runs first; predict auto-fires when eval succeeds (see enabled)
             evalQ.refetch();
           }}
           style={{

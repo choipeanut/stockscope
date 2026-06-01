@@ -21,16 +21,34 @@ logger = logging.getLogger(__name__)
 _CACHE: dict[str, tuple[float, dict]] = {}
 _CACHE_TTL = 3600  # 1 hour — backtests are expensive and don't change intraday
 
+# Shared point-in-time dataset cache, keyed by (market, years, rebalance, holding).
+# Both /predict and /predict/eval build the SAME dataset; caching it here avoids
+# re-fetching multi-year OHLCV for the whole universe twice (the cause of the
+# /predict timeout on small servers).
+_DATASET_CACHE: dict[str, tuple[float, object]] = {}
 
-def _build_eval(market_filter, years, rebalance_days, holding_days, n_splits):
-    """Build dataset + walk-forward report (imported lazily to keep import cheap)."""
+
+def _get_dataset(market_filter, years, rebalance_days, holding_days):
+    """Build (or reuse) the point-in-time dataset for these parameters."""
     from app.backtest.dataset import build_dataset
-    from app.backtest.model import walk_forward_eval
 
+    key = f"ds:{market_filter}:{years}:{rebalance_days}:{holding_days}"
+    cached = _DATASET_CACHE.get(key)
+    if cached and (time.time() - cached[0]) < _CACHE_TTL:
+        return cached[1]
     df = build_dataset(
         market=market_filter, years=years,
         rebalance_days=rebalance_days, holding_days=holding_days,
     )
+    _DATASET_CACHE[key] = (time.time(), df)
+    return df
+
+
+def _build_eval(market_filter, years, rebalance_days, holding_days, n_splits):
+    """Build dataset + walk-forward report (imported lazily to keep import cheap)."""
+    from app.backtest.model import walk_forward_eval
+
+    df = _get_dataset(market_filter, years, rebalance_days, holding_days)
     report = walk_forward_eval(df, n_splits=n_splits)
     return df, report
 
@@ -109,7 +127,7 @@ def predict(
     """
     from datetime import datetime, timezone
 
-    from app.backtest.dataset import _features_at, build_dataset
+    from app.backtest.dataset import _features_at
     from app.backtest.engine import (
         _load_index,
         _load_prices,
@@ -121,8 +139,8 @@ def predict(
 
     market_filter = market.upper() if market else None
 
-    # 1) train on the full point-in-time dataset
-    df = build_dataset(market=market_filter, years=years, holding_days=holding_days)
+    # 1) train on the full point-in-time dataset (shared cache → no double build)
+    df = _get_dataset(market_filter, years, 21, holding_days)
     if df.empty or df["label"].nunique() < 2:
         return {"status": "insufficient_data", "predictions": [], "as_of": None}
     model = train_logistic(df)
