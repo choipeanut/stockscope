@@ -153,10 +153,20 @@ def _relative_strength(
         return float("nan"), {}
     p0, p1 = -(period + 1), -1
     stock_ret = (close.iloc[p1] - close.iloc[p0]) / close.iloc[p0]
-    if index_close is not None and len(index_close) >= period + 1:
-        idx_ret = (index_close.iloc[p1] - index_close.iloc[p0]) / index_close.iloc[p0]
-    else:
-        idx_ret = 0.0
+    if np.isnan(stock_ret):
+        return float("nan"), {}
+    # Index can carry NaN gaps (holidays, vendor fills). Drop them before taking
+    # the 60d window so a single NaN doesn't nuke the whole feature for every
+    # stock (which would empty the training set).
+    idx_ret = 0.0
+    if index_close is not None:
+        idx_clean = index_close.dropna()
+        if len(idx_clean) >= period + 1:
+            i0 = idx_clean.iloc[p0]
+            i1 = idx_clean.iloc[p1]
+            r = (i1 - i0) / i0
+            if not np.isnan(r):
+                idx_ret = r
     rel = stock_ret - idx_ret
     # Map rel [-0.30, +0.30] → [0, 100] clamped
     score = float(np.clip((rel + 0.30) / 0.60 * 100, 0, 100))

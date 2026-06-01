@@ -115,10 +115,13 @@ def _features_at(
     except Exception:
         return None
     comps = res.components or {}
-    # require all features present (no partial rows — keeps the matrix clean)
-    if not all(c in comps for c in FEATURE_COLS):
+    # Need a usable core, but don't let one occasionally-NaN feature (e.g.
+    # relative_strength when the index has a gap) drop the whole row — that can
+    # silently empty the entire dataset. Missing features default to a neutral
+    # 50 (the 0–100 midpoint); require at least the core trend signal present.
+    if "trend_alignment" not in comps:
         return None
-    return {c: float(comps[c]) for c in FEATURE_COLS}
+    return {c: float(comps.get(c, 50.0)) for c in FEATURE_COLS}
 
 
 def build_dataset(
