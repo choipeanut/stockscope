@@ -217,6 +217,62 @@ export async function fetchPrices(
   return data;
 }
 
+export interface PredictionRow {
+  ticker: string;
+  market: string;
+  name: string;
+  probability: number;
+  features: Record<string, number>;
+}
+
+export interface PredictResponse {
+  status: string;
+  market: string;
+  horizon_days: number;
+  n_train_samples: number;
+  predictions: PredictionRow[];
+  as_of: string | null;
+  disclaimer: string;
+}
+
+export async function fetchPredict(
+  market?: string,
+  horizonDays = 21,
+): Promise<PredictResponse> {
+  const { data } = await api.get<PredictResponse>("/predict", {
+    params: { market: market ?? "", holding_days: horizonDays, limit: 100 },
+    timeout: 300_000,
+  });
+  return data;
+}
+
+export interface PredictEvalResponse {
+  market: string;
+  n_samples: number;
+  report: {
+    n_train: number;
+    n_test: number;
+    auc: number | null;
+    accuracy: number | null;
+    baseline_accuracy: number | null;
+    rank_ic: number | null;
+    n_splits: number;
+    feature_weights: Record<string, number>;
+  };
+  cached?: boolean;
+}
+
+export async function fetchPredictEval(
+  market?: string,
+  horizonDays = 21,
+): Promise<PredictEvalResponse> {
+  const { data } = await api.get<PredictEvalResponse>("/predict/eval", {
+    params: { market: market ?? "", holding_days: horizonDays },
+    timeout: 300_000,
+  });
+  return data;
+}
+
 export async function fetchScreen(
   market?: string,
   minScore?: number,
