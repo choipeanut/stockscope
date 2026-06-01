@@ -17,12 +17,17 @@ import numpy as np
 import pandas as pd
 
 WEIGHTS = {
-    "trend_alignment": 0.30,
-    "rsi": 0.15,
-    "macd": 0.15,
-    "volume": 0.15,
-    "relative_strength": 0.15,
+    "trend_alignment": 0.20,
+    "rsi": 0.10,
+    "macd": 0.10,
+    "volume": 0.10,
+    "relative_strength": 0.10,
     "high52w": 0.10,
+    # Additional ML features (also used in backtest/dataset.py)
+    "short_reversal": 0.10,   # 5d return inverted — mean-reversion signal
+    "realized_vol": 0.10,     # 20d vol inverted — low-vol anomaly
+    "vol_ratio": 0.05,        # vol/MA20vol continuous — breaks binary bucketing
+    "price_accel": 0.05,      # 20d return − 60d return — momentum acceleration
 }
 
 
@@ -158,6 +163,50 @@ def _relative_strength(
     return score, {"stock_60d": stock_ret, "index_60d": idx_ret, "relative": rel}
 
 
+def _short_reversal(close: pd.Series, period: int = 5) -> float:
+    """5-day return, inverted and scaled 0-100.  Recent drop → high score (mean reversion)."""
+    if len(close) < period + 1:
+        return float("nan")
+    ret = (close.iloc[-1] - close.iloc[-(period + 1)]) / close.iloc[-(period + 1)]
+    # Map [-0.10, +0.10] inverted → [0, 100].  ret=−10% → 100; ret=+10% → 0
+    return float(np.clip((0.10 - ret) / 0.20 * 100, 0, 100))
+
+
+def _realized_vol(close: pd.Series, period: int = 20) -> float:
+    """Annualised 20-day realised vol, inverted: lower vol → higher score (low-vol anomaly)."""
+    if len(close) < period + 1:
+        return float("nan")
+    rets = close.pct_change().iloc[-period:]
+    vol = float(rets.std() * np.sqrt(252))
+    if np.isnan(vol) or vol <= 0:
+        return float("nan")
+    # Map vol [0.10, 0.80] inverted → [0, 100]
+    return float(np.clip((0.80 - vol) / 0.70 * 100, 0, 100))
+
+
+def _vol_ratio(df: pd.DataFrame, period: int = 20) -> float:
+    """Current volume / MA-period volume, capped at 3×, mapped to [0, 100]."""
+    volume = _safe_series(df, "volume")
+    if volume is None or len(volume) < period:
+        return float("nan")
+    avg = volume.iloc[-period:].mean()
+    if avg <= 0:
+        return float("nan")
+    ratio = float(volume.iloc[-1] / avg)
+    return float(np.clip(ratio / 3.0 * 100, 0, 100))
+
+
+def _price_accel(close: pd.Series) -> float:
+    """20d return minus 60d return: positive → momentum accelerating."""
+    if len(close) < 62:
+        return float("nan")
+    r20 = (close.iloc[-1] - close.iloc[-21]) / close.iloc[-21]
+    r60 = (close.iloc[-1] - close.iloc[-61]) / close.iloc[-61]
+    diff = r20 - r60
+    # Map [-0.15, +0.15] → [0, 100]
+    return float(np.clip((diff + 0.15) / 0.30 * 100, 0, 100))
+
+
 def _high52w_proximity(close: pd.Series) -> tuple[float, dict]:
     """Distance to 52-week high → score (closer = higher)."""
     if len(close) < 20:
@@ -204,6 +253,10 @@ def compute_momentum(df: pd.DataFrame, index_df: pd.DataFrame | None = None) -> 
         "volume": vol_score,
         "relative_strength": rs_score,
         "high52w": high_score,
+        "short_reversal": _short_reversal(close),
+        "realized_vol": _realized_vol(close),
+        "vol_ratio": _vol_ratio(df),
+        "price_accel": _price_accel(close),
     }
 
     unavailable = [k for k, v in raw.items() if np.isnan(v)]

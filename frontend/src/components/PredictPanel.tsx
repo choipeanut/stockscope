@@ -15,6 +15,10 @@ const FEATURE_LABELS: Record<string, string> = {
   volume: "거래량",
   relative_strength: "상대강도",
   high52w: "신고가근접",
+  short_reversal: "단기반전",
+  realized_vol: "저변동성",
+  vol_ratio: "거래량비율",
+  price_accel: "모멘텀가속",
 };
 
 function probColor(p: number): string {
