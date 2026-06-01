@@ -73,28 +73,35 @@ def _dart_features_at(history: pd.DataFrame | None, as_of) -> dict[str, float] |
         return None
     rec = usable.iloc[-1]  # history is sorted by available_from ascending
 
-    revenue = rec.get("revenue")
-    op_income = rec.get("op_income")
-    net_income = rec.get("net_income")
-    equity = rec.get("equity")
+    def num(key) -> float | None:
+        """Cached records turn None into NaN — treat both as missing."""
+        v = rec.get(key)
+        if v is None:
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        import math
+        return None if math.isnan(f) else f
 
-    rev_growth = _pct_growth(revenue, rec.get("prev_revenue"))
-    profit_growth = _pct_growth(op_income, rec.get("prev_op_income"))
-    roe = (net_income / equity * 100.0) if (net_income is not None and equity) else None
-    op_margin = (op_income / revenue * 100.0) if (op_income is not None and revenue) else None
-    debt_ratio = (rec.get("debt") / equity * 100.0) if (rec.get("debt") is not None and equity) else None
+    revenue, op_income = num("revenue"), num("op_income")
+    net_income, equity = num("net_income"), num("equity")
+    debt = num("debt")
+    prev_rev, prev_op = num("prev_revenue"), num("prev_op_income")
 
     feats = {
-        "f_revenue_growth": rev_growth,
-        "f_profit_growth": profit_growth,
-        "f_roe": roe,
-        "f_op_margin": op_margin,
-        "f_debt_ratio": debt_ratio,
+        "f_revenue_growth": _pct_growth(revenue, prev_rev),
+        "f_profit_growth": _pct_growth(op_income, prev_op),
+        "f_roe": (net_income / equity * 100.0) if (net_income is not None and equity) else None,
+        "f_op_margin": (op_income / revenue * 100.0) if (op_income is not None and revenue) else None,
+        "f_debt_ratio": (debt / equity * 100.0) if (debt is not None and equity) else None,
     }
-    # require all present to keep the matrix clean (consistent with _features_at)
-    if any(v is None for v in feats.values()):
+    # Return whatever parsed (partial allowed). Missing values stay None and are
+    # imputed cross-sectionally upstream; the row is never dropped for them.
+    if all(v is None for v in feats.values()):
         return None
-    return {k: float(v) for k, v in feats.items()}
+    return feats
 
 
 def _features_at(
@@ -178,9 +185,10 @@ def build_dataset(
                 # DART enriches but never blocks: missing fundamentals stay NaN
                 # and are imputed (or the column is dropped) after assembly. A
                 # None here means "not yet public at as_of" → correctly absent.
-                dart_feats = _dart_features_at((dart_history or {}).get(t), as_of)
+                dart_feats = _dart_features_at((dart_history or {}).get(t), as_of) or {}
                 for col in DART_FEATURE_COLS:
-                    row[col] = float((dart_feats or {}).get(col, float("nan")))
+                    v = dart_feats.get(col)
+                    row[col] = float(v) if v is not None else float("nan")
             fr = _forward_return(df, as_of, holding_days)
             if np.isnan(fr):
                 continue

@@ -197,7 +197,8 @@ def _run_predict(key, market_filter, years, holding_days, limit):
             if dart_cols:
                 dart_feats = _dart_features_at(dart_hist.get(t), today) or {}
                 for c in dart_cols:
-                    feats[c] = float(dart_feats.get(c, float("nan")))
+                    v = dart_feats.get(c)
+                    feats[c] = float(v) if v is not None else float("nan")
             name = next((i.get("name", "") for i in tickers if i["ticker"] == t), "")
             name = name or get_company_name(t, m)
             candidates.append({"ticker": t, "market": m, "name": name, "feats": feats})
@@ -243,6 +244,26 @@ def _run_predict(key, market_filter, years, holding_days, limit):
     except Exception as e:
         logger.warning("[predict] failed: %s", e, exc_info=True)
         _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
+
+
+# ---------------------------------------------------------------------------
+# /predict/dart-check  — diagnostic: is DART actually parsing for a ticker?
+# ---------------------------------------------------------------------------
+@router.get("/predict/dart-check")
+def dart_check(ticker: str = Query("005930")) -> dict:
+    """Returns the parsed point-in-time fundamentals for one KR ticker so we can
+    confirm DART connectivity + account matching without guessing from the UI."""
+    import os
+    from app.collectors.dart_fundamentals import get_kr_fundamental_history
+    has_key = bool(os.environ.get("DART_API_KEY"))
+    hist = get_kr_fundamental_history(ticker, years=6)
+    return {
+        "ticker": ticker,
+        "dart_api_key_present": has_key,
+        "rows_parsed": int(len(hist)),
+        "history": hist.astype(object).where(hist.notna(), None).to_dict("records")
+        if not hist.empty else [],
+    }
 
 
 @router.get("/predict")

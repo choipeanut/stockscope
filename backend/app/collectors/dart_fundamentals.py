@@ -42,34 +42,85 @@ HISTORY_COLS = [
     "prev_revenue", "prev_op_income",
 ]
 
-# DART account-name substrings (consolidated statements use these labels).
-_ACCOUNTS = {
-    "revenue": "매출액",
-    "op_income": "영업이익",
-    "net_income": "당기순이익",
-    "equity": "자본총계",
-    "assets": "자산총계",
-    "debt": "부채총계",
+# Robust account matching. Prefer standardized XBRL `account_id` codes (stable
+# across companies), then fall back to Korean `account_nm` variants. Each metric
+# lists (id-substrings, name-substrings); the first row matching any wins.
+_METRICS: dict[str, tuple[list[str], list[str]]] = {
+    "revenue": (
+        ["Revenue", "ifrs-full_Revenue", "ifrs_Revenue"],
+        ["매출액", "영업수익", "수익(매출액)", "수익(매출"],
+    ),
+    "op_income": (
+        ["OperatingIncomeLoss", "ProfitLossFromOperatingActivities", "dart_OperatingIncome"],
+        ["영업이익"],
+    ),
+    "net_income": (
+        ["ProfitLoss", "ifrs-full_ProfitLoss", "ifrs_ProfitLoss"],
+        ["당기순이익", "분기순이익", "반기순이익"],
+    ),
+    "equity": (
+        ["ifrs-full_Equity", "ifrs_Equity", "Equity"],
+        ["자본총계"],
+    ),
+    "assets": (
+        ["ifrs-full_Assets", "ifrs_Assets", "Assets"],
+        ["자산총계"],
+    ),
+    "debt": (
+        ["ifrs-full_Liabilities", "ifrs_Liabilities", "Liabilities"],
+        ["부채총계"],
+    ),
 }
 
 
 def _to_float(v) -> float | None:
     if v is None:
         return None
+    s = str(v).strip().replace(",", "")
+    if s in ("", "-", "–"):
+        return None
+    # accounting negatives: "(1,234)" → -1234
+    if s.startswith("(") and s.endswith(")"):
+        s = "-" + s[1:-1]
     try:
-        f = float(str(v).replace(",", ""))
+        f = float(s)
     except (TypeError, ValueError):
         return None
     import math
     return None if (math.isnan(f) or math.isinf(f)) else f
 
 
-def _row_value(fs: pd.DataFrame, account_nm: str, col: str) -> float | None:
-    """First matching account row's amount in `col` (thstrm_amount / frmtrm_amount)."""
-    rows = fs[fs["account_nm"].str.contains(account_nm, na=False)]
-    if rows.empty:
-        return None
-    return _to_float(rows.iloc[0].get(col))
+def _prefer_consolidated(fs: pd.DataFrame) -> pd.DataFrame:
+    """Use consolidated (CFS) statements when present, else separate (OFS)."""
+    if "fs_div" not in fs.columns:
+        return fs
+    cfs = fs[fs["fs_div"] == "CFS"]
+    return cfs if not cfs.empty else fs
+
+
+def _row_value(fs: pd.DataFrame, metric: str, col: str) -> float | None:
+    """Amount in `col` for the first row matching `metric`'s id or name patterns."""
+    id_subs, nm_subs = _METRICS[metric]
+    candidates = fs
+    if "account_id" in fs.columns:
+        mask = fs["account_id"].astype(str).str.contains(
+            "|".join(id_subs), case=False, na=False, regex=True
+        )
+        if mask.any():
+            candidates = fs[mask]
+        else:
+            candidates = fs[fs["account_nm"].str.contains(
+                "|".join(nm_subs), na=False, regex=True
+            )]
+    else:
+        candidates = fs[fs["account_nm"].str.contains(
+            "|".join(nm_subs), na=False, regex=True
+        )]
+    for _, row in candidates.iterrows():
+        val = _to_float(row.get(col))
+        if val is not None:
+            return val
+    return None
 
 
 def _available_from(fiscal_year: int) -> date:
@@ -89,11 +140,12 @@ def _build_history_from_reader(dr, corp_code: str, years: int) -> list[dict]:
             fs = None
         if fs is None or fs.empty or "account_nm" not in fs.columns:
             continue
+        fs = _prefer_consolidated(fs)
         rec = {"fiscal_year": fy, "available_from": _available_from(fy)}
-        for key, account in _ACCOUNTS.items():
-            rec[key] = _row_value(fs, account, "thstrm_amount")
-        rec["prev_revenue"] = _row_value(fs, _ACCOUNTS["revenue"], "frmtrm_amount")
-        rec["prev_op_income"] = _row_value(fs, _ACCOUNTS["op_income"], "frmtrm_amount")
+        for metric in _METRICS:
+            rec[metric] = _row_value(fs, metric, "thstrm_amount")
+        rec["prev_revenue"] = _row_value(fs, "revenue", "frmtrm_amount")
+        rec["prev_op_income"] = _row_value(fs, "op_income", "frmtrm_amount")
         # require at least revenue to be a usable row
         if rec.get("revenue") is not None:
             rows.append(rec)
