@@ -124,11 +124,23 @@ def _score_due() -> int:
 
 def _run_catalyst(key: str, market_filter: str, horizon_days: int, limit: int,
                   use_claude: bool):
+    """Background worker — serialised against other heavy jobs to bound memory."""
+    from app.services.heavy import heavy_slot
+    try:
+        with heavy_slot():
+            _build_catalyst_picks(key, market_filter, horizon_days, limit, use_claude)
+    except Exception as e:
+        logger.warning("[catalyst] failed: %s", e, exc_info=True)
+        _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
+
+
+def _build_catalyst_picks(key: str, market_filter: str, horizon_days: int,
+                          limit: int, use_claude: bool):
     from app.collectors.universe import get_universe
     from app.collectors.prices import get_ohlcv
     from app.collectors.company_name import get_company_name
     from app.services.catalyst import catalyst_score
-    try:
+    if True:
         # 1) score anything that's come due first
         n_scored = _score_due()
 
@@ -216,9 +228,6 @@ def _run_catalyst(key: str, market_filter: str, horizon_days: int, limit: int,
             "ts": time.time(),
         }
         logger.info("[catalyst] done: %d picks, %d scored", len(picks), n_scored)
-    except Exception as e:
-        logger.warning("[catalyst] failed: %s", e, exc_info=True)
-        _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
 
 
 @router.get("/catalyst/run")
