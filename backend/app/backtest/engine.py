@@ -101,8 +101,12 @@ def _load_prices(
         try:
             df = get_ohlcv(t, m, period_days=lookback_days)
             if df is not None and not df.empty:
-                df = df.sort_values("date").reset_index(drop=True)
-                df["date"] = pd.to_datetime(df["date"]).dt.date
+                df = df.copy()
+                # Force a true datetime64 dtype so the column can NEVER end up a
+                # mix of datetime.date / float / str (which breaks .max() and
+                # every comparison). errors="coerce" turns junk into NaT.
+                df["date"] = pd.to_datetime(df["date"], errors="coerce")
+                df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
                 out[(t, m)] = df
         except Exception as e:
             logger.debug("backtest: price fetch failed %s/%s: %s", t, m, e)
@@ -112,8 +116,9 @@ def _load_prices(
 def _load_index(market: str, lookback_days: int) -> pd.DataFrame | None:
     try:
         df = get_ohlcv(_INDEX_TICKER.get(market, "^IXIC"), market, period_days=lookback_days)
-        df = df.sort_values("date").reset_index(drop=True)
-        df["date"] = pd.to_datetime(df["date"]).dt.date
+        df = df.copy()
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
         return df
     except Exception:
         return None
