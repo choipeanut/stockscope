@@ -35,8 +35,8 @@ def _get_kr_fundamentals(ticker: str) -> dict:
     if not dart_key:
         return result
     try:
-        import OpenDartReader as dart
-        dr = dart.OpenDartReader(dart_key)
+        from app.collectors.dart_fundamentals import make_reader
+        dr = make_reader(dart_key)
 
         # corp_codes DataFrame has columns: corp_code, corp_name, stock_code, modify_date
         # find_corp_code()는 회사명 검색 → 종목코드로 직접 조회해야 함
