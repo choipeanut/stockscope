@@ -92,14 +92,17 @@ def _make_yf_session(timeout: int = 20):
 
 def _fetch_kr(ticker: str, start: str, end: str) -> pd.DataFrame:
     """한국 주식 OHLCV 취득. pykrx → FinanceDataReader → yfinance .KS/.KQ 순서로 폴백."""
-    # Method 1: pykrx
-    try:
-        from pykrx import stock as pykrx_stock
-        df = pykrx_stock.get_market_ohlcv_by_date(start, end, ticker)
-        if df is not None and not df.empty:
-            return df
-    except Exception:
-        pass
+    # Method 1: pykrx (skip when KRX credentials are absent — login attempt
+    # blocks for ~10 s before failing, making cold-cache serial loads very slow)
+    import os as _os
+    if _os.environ.get("KRX_ID") and _os.environ.get("KRX_PW"):
+        try:
+            from pykrx import stock as pykrx_stock
+            df = pykrx_stock.get_market_ohlcv_by_date(start, end, ticker)
+            if df is not None and not df.empty:
+                return df
+        except Exception:
+            pass
 
     # Method 2: FinanceDataReader
     try:
