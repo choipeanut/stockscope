@@ -182,7 +182,11 @@ def _run_predict(key, market_filter, years, holding_days, limit):
                     dart_hist[t] = get_kr_fundamental_history(t, years=int(years) + 1)
 
         today = datetime.now(timezone.utc).date()
-        preds: list[dict] = []
+        # Pass 1: collect candidates. DART features may be missing for some
+        # tickers — kept as NaN and imputed cross-sectionally below (matching the
+        # training-time treatment), so a missing fundamental never drops a name.
+        dart_cols = [c for c in model.features if c.startswith("f_")]
+        candidates: list[dict] = []
         for (t, m), pdf in price_map.items():
             # date columns are already clean datetime64 from _load_prices/_load_index
             idx = index_map.get(m)
@@ -190,18 +194,36 @@ def _run_predict(key, market_filter, years, holding_days, limit):
             feats = _features_at(_slice_up_to(pdf, pdf["date"].max()), idx_sl)
             if feats is None:
                 continue
-            if include_dart:
-                dart_feats = _dart_features_at(dart_hist.get(t), today)
-                if dart_feats is None:
-                    continue
-                feats = {**feats, **dart_feats}
-            prob = float(model.predict_proba(pd.DataFrame([feats]))[0])
+            if dart_cols:
+                dart_feats = _dart_features_at(dart_hist.get(t), today) or {}
+                for c in dart_cols:
+                    feats[c] = float(dart_feats.get(c, float("nan")))
             name = next((i.get("name", "") for i in tickers if i["ticker"] == t), "")
             name = name or get_company_name(t, m)
+            candidates.append({"ticker": t, "market": m, "name": name, "feats": feats})
+
+        if not candidates:
+            _store[key] = {
+                "status": "ok",
+                "payload": {"status": "insufficient_data", "predictions": [], "as_of": None},
+                "ts": time.time(),
+            }
+            return
+
+        feat_df = pd.DataFrame([c["feats"] for c in candidates])
+        # impute missing DART columns with the current cross-sectional median
+        for c in dart_cols:
+            if c in feat_df.columns:
+                feat_df[c] = feat_df[c].fillna(feat_df[c].median())
+                feat_df[c] = feat_df[c].fillna(0.0)  # backstop if all NaN
+        probs = model.predict_proba(feat_df)
+
+        preds: list[dict] = []
+        for cand, prob, (_, frow) in zip(candidates, probs, feat_df.iterrows()):
             preds.append({
-                "ticker": t, "market": m, "name": name,
-                "probability": round(prob, 4),
-                "features": {k: round(v, 2) for k, v in feats.items()},
+                "ticker": cand["ticker"], "market": cand["market"], "name": cand["name"],
+                "probability": round(float(prob), 4),
+                "features": {k: round(float(v), 2) for k, v in frow.items()},
             })
 
         preds.sort(key=lambda r: r["probability"], reverse=True)

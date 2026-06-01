@@ -140,10 +140,11 @@ def test_dart_features_attach_to_kr_dataset():
     assert df["f_revenue_growth"].notna().all()
 
 
-def test_dart_point_in_time_drops_rows_without_public_fundamentals():
+def test_dart_point_in_time_excludes_not_yet_public_fundamentals():
     pm = _kr_world()
-    # fundamentals only become public in 2020 — after the whole price window →
-    # every row should be dropped (no leakage of not-yet-filed reports).
+    # fundamentals only become public in 2099 — after the whole price window →
+    # they must NEVER enter as features (no leakage of not-yet-filed reports).
+    # The dataset still builds (price-only); the DART columns are simply absent.
     future_hist = {}
     for (t, _) in pm:
         h = _dart_hist(t, 0.1)
@@ -153,7 +154,31 @@ def test_dart_point_in_time_drops_rows_without_public_fundamentals():
         price_map=pm, index_map={}, years=1.0,
         include_dart=True, dart_history=future_hist,
     )
-    assert df.empty
+    assert not df.empty  # price features keep the panel usable
+    # not-yet-public fundamentals were dropped, never leaked as features
+    assert not set(dataset.DART_FEATURE_COLS).intersection(df.columns)
+    assert set(dataset.FEATURE_COLS).issubset(df.columns)
+
+
+def test_dart_partial_coverage_imputes_not_drops():
+    """Some KR tickers lack fundamentals → rows kept, gaps filled (not dropped)."""
+    pm = _kr_world()
+    keys = list(pm.keys())
+    growths = [0.30, 0.20, 0.10, -0.05, -0.10]  # 5 of 6 have data
+    from app.collectors.dart_fundamentals import HISTORY_COLS
+    hist = {t: _dart_hist(t, g) for (t, _), g in zip(keys, growths)}
+    # 6th ticker: no DART history at all
+    hist[keys[5][0]] = pd.DataFrame(columns=HISTORY_COLS)
+    df = dataset.build_dataset(
+        price_map=pm, index_map={}, years=1.0,
+        include_dart=True, dart_history=hist,
+    )
+    assert not df.empty
+    # 5/6 = 83% coverage > 30% → columns survive and are fully imputed
+    assert set(dataset.DART_FEATURE_COLS).issubset(df.columns)
+    assert df["f_revenue_growth"].notna().all()
+    # the no-data ticker still appears in the panel
+    assert keys[5][0] in set(df["ticker"])
 
 
 def test_kr_model_trains_with_dart_features():
