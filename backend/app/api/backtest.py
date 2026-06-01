@@ -250,20 +250,55 @@ def _run_predict(key, market_filter, years, holding_days, limit):
 # /predict/dart-check  — diagnostic: is DART actually parsing for a ticker?
 # ---------------------------------------------------------------------------
 @router.get("/predict/dart-check")
-def dart_check(ticker: str = Query("005930")) -> dict:
-    """Returns the parsed point-in-time fundamentals for one KR ticker so we can
-    confirm DART connectivity + account matching without guessing from the UI."""
+def dart_check(ticker: str = Query("005930"), year: int = Query(0)) -> dict:
+    """Step-by-step DART diagnostic so we can see exactly where parsing fails:
+    corp_code lookup → finstate_all call → available account columns/values."""
     import os
+    from datetime import datetime, timezone
     from app.collectors.dart_fundamentals import get_kr_fundamental_history
-    has_key = bool(os.environ.get("DART_API_KEY"))
+
+    out: dict = {"ticker": ticker, "dart_api_key_present": bool(os.environ.get("DART_API_KEY"))}
+    if not out["dart_api_key_present"]:
+        return out
+
+    probe_year = year or (datetime.now(timezone.utc).year - 1)
+    try:
+        import OpenDartReader
+        dr = OpenDartReader.OpenDartReader(os.environ["DART_API_KEY"])
+        codes = dr.corp_codes
+        out["corp_codes_columns"] = list(codes.columns)
+        match = codes[codes["stock_code"] == ticker]
+        out["corp_code_found"] = bool(match is not None and not match.empty)
+        if out["corp_code_found"]:
+            corp_code = match.iloc[0]["corp_code"]
+            out["corp_code"] = str(corp_code)
+            try:
+                fs = dr.finstate_all(corp_code, probe_year, reprt_code="11011")
+                out["probe_year"] = probe_year
+                if fs is None or fs.empty:
+                    out["finstate_rows"] = 0
+                else:
+                    out["finstate_rows"] = int(len(fs))
+                    out["finstate_columns"] = list(fs.columns)
+                    # sample of what accounts actually look like
+                    cols = [c for c in ["sj_div", "fs_div", "account_id", "account_nm",
+                                        "thstrm_amount", "frmtrm_amount"] if c in fs.columns]
+                    out["sample_rows"] = fs[cols].head(25).astype(object).where(
+                        fs[cols].notna(), None
+                    ).to_dict("records")
+            except Exception as e:
+                out["finstate_error"] = f"{type(e).__name__}: {e}"
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+
+    # also run the real parser
     hist = get_kr_fundamental_history(ticker, years=6)
-    return {
-        "ticker": ticker,
-        "dart_api_key_present": has_key,
-        "rows_parsed": int(len(hist)),
-        "history": hist.astype(object).where(hist.notna(), None).to_dict("records")
-        if not hist.empty else [],
-    }
+    out["rows_parsed"] = int(len(hist))
+    out["history"] = (
+        hist.astype(object).where(hist.notna(), None).to_dict("records")
+        if not hist.empty else []
+    )
+    return out
 
 
 @router.get("/predict")
