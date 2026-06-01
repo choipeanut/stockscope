@@ -86,8 +86,8 @@ def _fetch_dart_disclosures(ticker: str, limit: int = 10) -> list[dict]:
     if not dart_key:
         return []
     try:
-        import OpenDartReader
-        dart = OpenDartReader.OpenDartReader(dart_key)
+        from app.collectors.dart_fundamentals import make_reader
+        dart = make_reader(dart_key)
         corp_code = _corp_code(dart, ticker)
         if not corp_code:
             return []

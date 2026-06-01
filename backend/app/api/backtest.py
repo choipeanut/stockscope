@@ -263,8 +263,8 @@ def dart_check(ticker: str = Query("005930"), year: int = Query(0)) -> dict:
 
     probe_year = year or (datetime.now(timezone.utc).year - 1)
     try:
-        import OpenDartReader
-        dr = OpenDartReader.OpenDartReader(os.environ["DART_API_KEY"])
+        from app.collectors.dart_fundamentals import make_reader
+        dr = make_reader(os.environ["DART_API_KEY"])
         codes = dr.corp_codes
         out["corp_codes_columns"] = list(codes.columns)
         match = codes[codes["stock_code"] == ticker]

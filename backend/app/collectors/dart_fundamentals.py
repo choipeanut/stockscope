@@ -73,6 +73,17 @@ _METRICS: dict[str, tuple[list[str], list[str]]] = {
 }
 
 
+def make_reader(dart_key: str):
+    """Construct an OpenDartReader, robust to package layout.
+
+    Depending on the installed version, `import OpenDartReader` binds either the
+    class itself (callable directly) or a module exposing `.OpenDartReader`.
+    """
+    import OpenDartReader
+    cls = getattr(OpenDartReader, "OpenDartReader", OpenDartReader)
+    return cls(dart_key)
+
+
 def _to_float(v) -> float | None:
     if v is None:
         return None
@@ -169,8 +180,7 @@ def get_kr_fundamental_history(ticker: str, years: int = 6) -> pd.DataFrame:
 
     rows: list[dict] = []
     try:
-        import OpenDartReader
-        dr = OpenDartReader.OpenDartReader(dart_key)
+        dr = make_reader(dart_key)
         codes = dr.corp_codes
         match = codes[codes["stock_code"] == ticker]
         if match is None or match.empty:
