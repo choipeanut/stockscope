@@ -14,6 +14,7 @@ import { Watchlist, WatchlistAddButton } from "./components/Watchlist";
 import { NewsPanel } from "./components/NewsPanel";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { LoginPage } from "./components/LoginPage";
+import { PredictPanel } from "./components/PredictPanel";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
@@ -224,7 +225,7 @@ const TAB_STYLE = (active: boolean) => ({
 
 function AppShell() {
   const { user, logout } = useAuth();
-  const [tab, setTab] = useState<"analyze" | "screen" | "macro" | "portfolio">("analyze");
+  const [tab, setTab] = useState<"analyze" | "screen" | "predict" | "macro" | "portfolio">("analyze");
   const [drillTicker, setDrillTicker] = useState("");
   const [drillMarket, setDrillMarket] = useState<"KOSDAQ" | "NASDAQ">("NASDAQ");
 
@@ -244,6 +245,7 @@ function AppShell() {
         <span style={{ fontWeight: 800, fontSize: 18, marginRight: 16 }}>📈 StockScope</span>
         <button style={TAB_STYLE(tab === "analyze")} onClick={() => setTab("analyze")}>분석</button>
         <button style={TAB_STYLE(tab === "screen")} onClick={() => setTab("screen")}>스크리너</button>
+        <button style={TAB_STYLE(tab === "predict")} onClick={() => setTab("predict")}>AI예측</button>
         <button style={TAB_STYLE(tab === "macro")} onClick={() => setTab("macro")}>매크로</button>
         <button style={TAB_STYLE(tab === "portfolio")} onClick={() => setTab("portfolio")}>포트폴리오</button>
 
@@ -277,6 +279,11 @@ function AppShell() {
         {tab === "screen" && (
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
             <ScreenTable onDrillDown={handleDrillDown} />
+          </div>
+        )}
+        {tab === "predict" && (
+          <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+            <PredictPanel onDrillDown={handleDrillDown} />
           </div>
         )}
         {tab === "macro" && (
