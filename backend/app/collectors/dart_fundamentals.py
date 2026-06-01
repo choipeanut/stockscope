@@ -42,32 +42,33 @@ HISTORY_COLS = [
     "prev_revenue", "prev_op_income",
 ]
 
-# Robust account matching. Prefer standardized XBRL `account_id` codes (stable
-# across companies), then fall back to Korean `account_nm` variants. Each metric
-# lists (id-substrings, name-substrings); the first row matching any wins.
+# Robust account matching. EXACT standardized XBRL `account_id` codes first
+# (stable across companies, avoids "Assets" also matching "CurrentAssets"), then
+# exact Korean `account_nm`, then a loose name contains as last resort.
+# Each metric: (exact account_id candidates, exact/loose account_nm candidates).
 _METRICS: dict[str, tuple[list[str], list[str]]] = {
     "revenue": (
-        ["Revenue", "ifrs-full_Revenue", "ifrs_Revenue"],
-        ["매출액", "영업수익", "수익(매출액)", "수익(매출"],
+        ["ifrs-full_Revenue", "ifrs_Revenue"],
+        ["매출액", "영업수익", "수익(매출액)"],
     ),
     "op_income": (
-        ["OperatingIncomeLoss", "ProfitLossFromOperatingActivities", "dart_OperatingIncome"],
-        ["영업이익"],
+        ["dart_OperatingIncomeLoss", "ifrs-full_ProfitLossFromOperatingActivities"],
+        ["영업이익", "영업이익(손실)"],
     ),
     "net_income": (
-        ["ProfitLoss", "ifrs-full_ProfitLoss", "ifrs_ProfitLoss"],
-        ["당기순이익", "분기순이익", "반기순이익"],
+        ["ifrs-full_ProfitLoss", "ifrs_ProfitLoss"],
+        ["당기순이익", "당기순이익(손실)"],
     ),
     "equity": (
-        ["ifrs-full_Equity", "ifrs_Equity", "Equity"],
+        ["ifrs-full_Equity", "ifrs_Equity"],
         ["자본총계"],
     ),
     "assets": (
-        ["ifrs-full_Assets", "ifrs_Assets", "Assets"],
+        ["ifrs-full_Assets", "ifrs_Assets"],
         ["자산총계"],
     ),
     "debt": (
-        ["ifrs-full_Liabilities", "ifrs_Liabilities", "Liabilities"],
+        ["ifrs-full_Liabilities", "ifrs_Liabilities"],
         ["부채총계"],
     ),
 }
@@ -109,28 +110,33 @@ def _prefer_consolidated(fs: pd.DataFrame) -> pd.DataFrame:
     return cfs if not cfs.empty else fs
 
 
-def _row_value(fs: pd.DataFrame, metric: str, col: str) -> float | None:
-    """Amount in `col` for the first row matching `metric`'s id or name patterns."""
-    id_subs, nm_subs = _METRICS[metric]
-    candidates = fs
-    if "account_id" in fs.columns:
-        mask = fs["account_id"].astype(str).str.contains(
-            "|".join(id_subs), case=False, na=False, regex=True
-        )
-        if mask.any():
-            candidates = fs[mask]
-        else:
-            candidates = fs[fs["account_nm"].str.contains(
-                "|".join(nm_subs), na=False, regex=True
-            )]
-    else:
-        candidates = fs[fs["account_nm"].str.contains(
-            "|".join(nm_subs), na=False, regex=True
-        )]
-    for _, row in candidates.iterrows():
+def _first_value(rows: pd.DataFrame, col: str) -> float | None:
+    for _, row in rows.iterrows():
         val = _to_float(row.get(col))
         if val is not None:
             return val
+    return None
+
+
+def _row_value(fs: pd.DataFrame, metric: str, col: str) -> float | None:
+    """Amount in `col` for the row matching `metric`, most-specific match first."""
+    id_cands, nm_cands = _METRICS[metric]
+    # 1) exact account_id (most reliable, no substring contamination)
+    if "account_id" in fs.columns:
+        v = _first_value(fs[fs["account_id"].isin(id_cands)], col)
+        if v is not None:
+            return v
+    # 2) exact account_nm
+    if "account_nm" in fs.columns:
+        v = _first_value(fs[fs["account_nm"].isin(nm_cands)], col)
+        if v is not None:
+            return v
+        # 3) loose name contains (last resort)
+        v = _first_value(
+            fs[fs["account_nm"].str.contains("|".join(nm_cands), na=False, regex=True)], col
+        )
+        if v is not None:
+            return v
     return None
 
 
@@ -195,6 +201,15 @@ def get_kr_fundamental_history(ticker: str, years: int = 6) -> pd.DataFrame:
     if not df.empty:
         df["available_from"] = pd.to_datetime(df["available_from"]).dt.date
         df = df.sort_values("available_from").reset_index(drop=True)
-        # cache as list-of-dicts (JSON-friendly); dates become strings, that's ok
-        cache.set(cache_key, df.to_dict("records"), _TTL)
+        # Cache as JSON-safe records: dates → ISO strings (read path re-parses via
+        # pd.to_datetime). Best-effort — a cache failure must never break the fetch.
+        records = df.to_dict("records")
+        for r in records:
+            af = r.get("available_from")
+            if hasattr(af, "isoformat"):
+                r["available_from"] = af.isoformat()
+        try:
+            cache.set(cache_key, records, _TTL)
+        except Exception as e:
+            logger.debug("dart history cache skip %s: %s", ticker, e)
     return df
