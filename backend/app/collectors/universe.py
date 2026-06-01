@@ -10,52 +10,36 @@ logger = logging.getLogger(__name__)
 _CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
 _NASDAQ_CSV = _CONFIG_DIR / "nasdaq_universe.csv"
 
-# KOSPI 대형주 (삼성전자 등 거래소 상장)
+# KOSPI 대형주 (삼성전자 등 거래소 상장) — 12종목 (512MB Render 한계 고려)
 _KOSPI_TOP = [
     {"ticker": "005930", "name": "삼성전자"},
     {"ticker": "000660", "name": "SK하이닉스"},
-    {"ticker": "207940", "name": "삼성바이오로직스"},
     {"ticker": "005380", "name": "현대차"},
     {"ticker": "035420", "name": "NAVER"},
-    {"ticker": "005490", "name": "POSCO홀딩스"},
     {"ticker": "000270", "name": "기아"},
     {"ticker": "105560", "name": "KB금융"},
     {"ticker": "055550", "name": "신한지주"},
-    {"ticker": "028260", "name": "삼성물산"},
-    {"ticker": "012330", "name": "현대모비스"},
     {"ticker": "066570", "name": "LG전자"},
     {"ticker": "003550", "name": "LG"},
     {"ticker": "034730", "name": "SK"},
     {"ticker": "017670", "name": "SK텔레콤"},
-    {"ticker": "030200", "name": "KT"},
-    {"ticker": "032830", "name": "삼성생명"},
-    {"ticker": "003490", "name": "대한항공"},
     {"ticker": "086790", "name": "하나금융지주"},
-    {"ticker": "096770", "name": "SK이노베이션"},
 ]
 
-# KOSDAQ 대형주 (코스닥 상장)
+# KOSDAQ 대형주 (코스닥 상장) — 12종목
 _KOSDAQ_TOP = [
     {"ticker": "068270", "name": "셀트리온"},
     {"ticker": "035720", "name": "카카오"},
     {"ticker": "247540", "name": "에코프로비엠"},
     {"ticker": "086520", "name": "에코프로"},
     {"ticker": "196170", "name": "알테오젠"},
-    {"ticker": "263750", "name": "펄어비스"},
     {"ticker": "041510", "name": "에스엠"},
     {"ticker": "036570", "name": "엔씨소프트"},
-    {"ticker": "112040", "name": "위메이드"},
-    {"ticker": "091990", "name": "셀트리온헬스케어"},
-    {"ticker": "122870", "name": "와이지엔터테인먼트"},
-    {"ticker": "095340", "name": "ISC"},
-    {"ticker": "039030", "name": "이오테크닉스"},
     {"ticker": "214150", "name": "클래시스"},
     {"ticker": "145020", "name": "휴젤"},
     {"ticker": "058470", "name": "리노공업"},
     {"ticker": "357780", "name": "솔브레인"},
-    {"ticker": "131970", "name": "두산테스나"},
-    {"ticker": "241560", "name": "두산밥캣"},
-    {"ticker": "950130", "name": "엑스페릭스"},
+    {"ticker": "039030", "name": "이오테크닉스"},
 ]
 
 

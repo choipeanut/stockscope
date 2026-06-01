@@ -51,8 +51,11 @@ def _running_response(msg: str) -> dict:
 
 # ---------------------------------------------------------------------------
 # Shared dataset cache (avoid rebuilding for /predict after /predict/eval)
+# One lock ensures concurrent threads don't both build at the same time —
+# a double build would double peak memory and OOM on a 512 MB box.
 # ---------------------------------------------------------------------------
 _dataset_cache: dict[str, tuple[float, object]] = {}
+_dataset_lock = threading.Lock()
 
 
 def _get_dataset(market_filter, years, rebalance_days, holding_days):
@@ -60,19 +63,22 @@ def _get_dataset(market_filter, years, rebalance_days, holding_days):
     # Korea-only request → enrich with point-in-time DART fundamentals.
     include_dart = market_filter == "KOSDAQ"
     key = f"ds:{market_filter}:{years}:{rebalance_days}:{holding_days}:dart={include_dart}"
-    cached = _dataset_cache.get(key)
-    if cached and (time.time() - cached[0]) < _CACHE_TTL:
-        return cached[1]
-    df = build_dataset(
-        market=market_filter, years=years,
-        rebalance_days=rebalance_days, holding_days=holding_days,
-        include_dart=include_dart,
-    )
-    # Keep only the most recent dataset in memory — on a 512 MB box, retaining
-    # several full panels (one per market/horizon) is enough to OOM.
-    _dataset_cache.clear()
-    _dataset_cache[key] = (time.time(), df)
-    return df
+    # Hold the lock for the entire build: concurrent builds double peak memory
+    # and OOM a 512 MB box. Background threads don't block HTTP requests, so
+    # holding this lock for 20-30 s is fine.
+    with _dataset_lock:
+        cached = _dataset_cache.get(key)
+        if cached and (time.time() - cached[0]) < _CACHE_TTL:
+            return cached[1]
+        df = build_dataset(
+            market=market_filter, years=years,
+            rebalance_days=rebalance_days, holding_days=holding_days,
+            include_dart=include_dart,
+        )
+        # Keep only the most-recently built panel in memory.
+        _dataset_cache.clear()
+        _dataset_cache[key] = (time.time(), df)
+        return df
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +132,7 @@ def _run_predict_eval(key, market_filter, years, rebalance_days, holding_days, n
 @router.get("/predict/eval")
 def predict_eval(
     market: str = Query(""),
-    years: float = Query(5.0, ge=1.0, le=10.0),
+    years: float = Query(3.0, ge=1.0, le=10.0),
     rebalance_days: int = Query(21, ge=5, le=120),
     holding_days: int = Query(21, ge=5, le=120),
     n_splits: int = Query(4, ge=1, le=10),
@@ -324,7 +330,7 @@ def dart_check(ticker: str = Query("005930"), year: int = Query(0)) -> dict:
 @router.get("/predict")
 def predict(
     market: str = Query(""),
-    years: float = Query(5.0, ge=1.0, le=10.0),
+    years: float = Query(3.0, ge=1.0, le=10.0),
     holding_days: int = Query(21, ge=5, le=120),
     limit: int = Query(50, ge=1, le=200),
 ) -> dict:
