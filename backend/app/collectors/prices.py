@@ -91,7 +91,7 @@ def _make_yf_session(timeout: int = 20):
 
 
 def _fetch_kr(ticker: str, start: str, end: str) -> pd.DataFrame:
-    """한국 주식 OHLCV 취득. pykrx → FinanceDataReader → yfinance .KS 순서로 폴백."""
+    """한국 주식 OHLCV 취득. pykrx → FinanceDataReader → yfinance .KS/.KQ 순서로 폴백."""
     # Method 1: pykrx
     try:
         from pykrx import stock as pykrx_stock
@@ -110,13 +110,20 @@ def _fetch_kr(ticker: str, start: str, end: str) -> pd.DataFrame:
     except Exception:
         pass
 
-    # Method 3: yfinance .KS (Render에서 pykrx/FDR 실패 시 사용)
+    # Method 3: yfinance — try .KS (KOSPI) then .KQ (KOSDAQ) with actual date range.
+    # start is "YYYYMMDD" string → convert to "YYYY-MM-DD" for yfinance.
     import yfinance as yf
-    ks_ticker = ticker + ".KS"
+    yf_start = f"{start[:4]}-{start[4:6]}-{start[6:]}"
     session = _make_yf_session(20)
-    tk = yf.Ticker(ks_ticker, session=session)
-    df = tk.history(period="1y", auto_adjust=True)
-    return df
+    for suffix in (".KS", ".KQ"):
+        try:
+            tk = yf.Ticker(ticker + suffix, session=session)
+            df = tk.history(start=yf_start, auto_adjust=True)
+            if df is not None and not df.empty:
+                return df
+        except Exception:
+            pass
+    return pd.DataFrame()
 
 
 def _fetch_us(ticker: str, period_days: int, retries: int = 2) -> pd.DataFrame:

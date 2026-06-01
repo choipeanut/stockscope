@@ -27,6 +27,11 @@ _KOSPI_TOP = [
     {"ticker": "003550", "name": "LG"},
     {"ticker": "034730", "name": "SK"},
     {"ticker": "017670", "name": "SK텔레콤"},
+    {"ticker": "030200", "name": "KT"},
+    {"ticker": "032830", "name": "삼성생명"},
+    {"ticker": "003490", "name": "대한항공"},
+    {"ticker": "086790", "name": "하나금융지주"},
+    {"ticker": "096770", "name": "SK이노베이션"},
 ]
 
 # KOSDAQ 대형주 (코스닥 상장)
@@ -46,6 +51,11 @@ _KOSDAQ_TOP = [
     {"ticker": "039030", "name": "이오테크닉스"},
     {"ticker": "214150", "name": "클래시스"},
     {"ticker": "145020", "name": "휴젤"},
+    {"ticker": "058470", "name": "리노공업"},
+    {"ticker": "357780", "name": "솔브레인"},
+    {"ticker": "131970", "name": "두산테스나"},
+    {"ticker": "241560", "name": "두산밥캣"},
+    {"ticker": "950130", "name": "엑스페릭스"},
 ]
 
 
