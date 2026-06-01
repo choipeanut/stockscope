@@ -173,20 +173,19 @@ def build_dataset(
             feats = _features_at(sl, idx_sl)
             if feats is None:
                 continue
+            row = {"date": as_of, "ticker": t, "market": m, **feats}
             if include_dart:
-                dart_feats = _dart_features_at(
-                    (dart_history or {}).get(t), as_of
-                )
-                if dart_feats is None:
-                    continue  # KR model requires public fundamentals at as_of
-                feats = {**feats, **dart_feats}
+                # DART enriches but never blocks: missing fundamentals stay NaN
+                # and are imputed (or the column is dropped) after assembly. A
+                # None here means "not yet public at as_of" → correctly absent.
+                dart_feats = _dart_features_at((dart_history or {}).get(t), as_of)
+                for col in DART_FEATURE_COLS:
+                    row[col] = float((dart_feats or {}).get(col, float("nan")))
             fr = _forward_return(df, as_of, holding_days)
             if np.isnan(fr):
                 continue
-            day_rows.append({
-                "date": as_of, "ticker": t, "market": m,
-                **feats, "fwd_return": fr,
-            })
+            row["fwd_return"] = fr
+            day_rows.append(row)
 
         if len(day_rows) < 3:
             continue  # need a cross-section to define "beat the median"
@@ -198,4 +197,29 @@ def build_dataset(
 
     feature_cols = [*FEATURE_COLS, *DART_FEATURE_COLS] if include_dart else list(FEATURE_COLS)
     cols = ["date", "ticker", "market", *feature_cols, "fwd_return", "label"]
-    return pd.DataFrame(rows, columns=cols)
+    result = pd.DataFrame(rows, columns=cols)
+
+    if include_dart and not result.empty:
+        result = _impute_or_drop_dart(result)
+    return result
+
+
+def _impute_or_drop_dart(df: pd.DataFrame, min_coverage: float = 0.30) -> pd.DataFrame:
+    """Make DART columns usable without ever emptying the dataset.
+
+    For each DART feature column:
+      - if fewer than `min_coverage` of rows have a value, the signal is too
+        sparse to trust → drop the column (model falls back to price features);
+      - otherwise fill gaps with the SAME-DATE cross-sectional median (leak-free,
+        uses only that day's peers), with a global-median backstop for any date
+        that had no values at all.
+    """
+    for col in DART_FEATURE_COLS:
+        if col not in df.columns:
+            continue
+        if df[col].notna().mean() < min_coverage:
+            df = df.drop(columns=[col])
+            continue
+        df[col] = df.groupby("date")[col].transform(lambda s: s.fillna(s.median()))
+        df[col] = df[col].fillna(df[col].median())
+    return df
