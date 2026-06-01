@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 from app.api.analyze import router as analyze_router  # noqa: E402
 from app.api.auth import router as auth_router  # noqa: E402
+from app.api.backtest import router as backtest_router  # noqa: E402
 from app.api.macro import router as macro_router  # noqa: E402
 from app.api.news import router as news_router  # noqa: E402
 from app.api.portfolio import router as portfolio_router  # noqa: E402
@@ -49,6 +50,7 @@ app.include_router(portfolio_router)
 app.include_router(screen_router)
 app.include_router(macro_router)
 app.include_router(news_router)
+app.include_router(backtest_router)
 
 
 @app.on_event("startup")
