@@ -172,7 +172,13 @@ def _run_predict(key, market_filter, years, holding_days, limit):
 
         preds: list[dict] = []
         for (t, m), pdf in price_map.items():
+            # ensure date column is datetime.date regardless of cache format
+            pdf = pdf.copy()
+            pdf["date"] = pd.to_datetime(pdf["date"]).dt.date
             idx = index_map.get(m)
+            if idx is not None:
+                idx = idx.copy()
+                idx["date"] = pd.to_datetime(idx["date"]).dt.date
             idx_sl = _slice_up_to(idx, idx["date"].max()) if idx is not None else None
             feats = _features_at(_slice_up_to(pdf, pdf["date"].max()), idx_sl)
             if feats is None:
