@@ -126,9 +126,14 @@ def _all_trading_dates(price_map: dict[tuple[str, str], pd.DataFrame]) -> list[d
     return sorted(dates)
 
 
-def _slice_up_to(df: pd.DataFrame, as_of: date) -> pd.DataFrame:
-    """Rows on or before as_of (point-in-time: nothing from the future)."""
-    return df[df["date"] <= as_of]
+def _slice_up_to(df: pd.DataFrame, as_of) -> pd.DataFrame:
+    """Rows on or before as_of (point-in-time: nothing from the future).
+
+    Coerces the date column to pandas datetime so comparison works regardless
+    of whether the cache returned dates as datetime.date, str, or epoch float.
+    """
+    d = pd.to_datetime(df["date"], errors="coerce")
+    return df[d <= pd.to_datetime(as_of)]
 
 
 def _forward_return(df: pd.DataFrame, as_of: date, holding_days: int) -> float:
