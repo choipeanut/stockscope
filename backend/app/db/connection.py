@@ -67,6 +67,30 @@ CREATE TABLE IF NOT EXISTS watchlist (
     added_ts TEXT NOT NULL,
     UNIQUE(user_id, ticker, market)
 );
+CREATE TABLE IF NOT EXISTS predictions (
+    id            SERIAL PRIMARY KEY,
+    strategy      TEXT NOT NULL,              -- 'catalyst' | 'momentum' | 'ml' ...
+    ticker        TEXT NOT NULL,
+    market        TEXT NOT NULL,
+    name          TEXT,
+    created_at    TEXT NOT NULL,              -- prediction timestamp (박제 시점)
+    horizon_days  INTEGER NOT NULL,
+    due_at        TEXT NOT NULL,              -- when to score it
+    score         DOUBLE PRECISION,           -- strategy score at creation
+    rank          INTEGER,                    -- rank within the batch
+    thesis        TEXT,                       -- pre-registered reason
+    entry_price   DOUBLE PRECISION,
+    features      TEXT,                        -- JSON snapshot of inputs
+    -- filled in at scoring time:
+    scored_at     TEXT,
+    exit_price    DOUBLE PRECISION,
+    stock_return  DOUBLE PRECISION,
+    bench_return  DOUBLE PRECISION,
+    excess_return DOUBLE PRECISION,
+    hit           INTEGER                      -- 1 if excess_return>0 else 0
+);
+CREATE INDEX IF NOT EXISTS idx_pred_due ON predictions(due_at, scored_at);
+CREATE INDEX IF NOT EXISTS idx_pred_strategy ON predictions(strategy, created_at);
 """
 
 # SQLite 스키마
@@ -113,6 +137,29 @@ CREATE TABLE IF NOT EXISTS watchlist (
     added_ts TEXT NOT NULL,
     UNIQUE(user_id, ticker, market)
 );
+CREATE TABLE IF NOT EXISTS predictions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy      TEXT NOT NULL,
+    ticker        TEXT NOT NULL,
+    market        TEXT NOT NULL,
+    name          TEXT,
+    created_at    TEXT NOT NULL,
+    horizon_days  INTEGER NOT NULL,
+    due_at        TEXT NOT NULL,
+    score         REAL,
+    rank          INTEGER,
+    thesis        TEXT,
+    entry_price   REAL,
+    features      TEXT,
+    scored_at     TEXT,
+    exit_price    REAL,
+    stock_return  REAL,
+    bench_return  REAL,
+    excess_return REAL,
+    hit           INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_pred_due ON predictions(due_at, scored_at);
+CREATE INDEX IF NOT EXISTS idx_pred_strategy ON predictions(strategy, created_at);
 """
 
 

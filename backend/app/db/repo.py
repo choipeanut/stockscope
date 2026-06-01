@@ -177,3 +177,80 @@ def delete_watchlist(user_id: int, wid: int) -> None:
         execute(con,
             "DELETE FROM watchlist WHERE id=? AND user_id=?", (wid, user_id)
         )
+
+
+# ── Predictions (catalyst/strategy tracking loop) ───────────────────────────
+
+def insert_predictions(rows: list[dict]) -> int:
+    """Persist a batch of pre-registered predictions. Returns count inserted."""
+    if not rows:
+        return 0
+    with get_conn() as con:
+        for r in rows:
+            execute(con,
+                """INSERT INTO predictions
+                   (strategy, ticker, market, name, created_at, horizon_days,
+                    due_at, score, rank, thesis, entry_price, features)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (r["strategy"], r["ticker"], r["market"], r.get("name"),
+                 r["created_at"], r["horizon_days"], r["due_at"],
+                 r.get("score"), r.get("rank"), r.get("thesis"),
+                 r.get("entry_price"), r.get("features")),
+            )
+    return len(rows)
+
+
+def get_recent_predictions(strategy: str | None = None, limit: int = 100) -> list[dict]:
+    with get_conn() as con:
+        if strategy:
+            return fetchall(con,
+                "SELECT * FROM predictions WHERE strategy=? ORDER BY created_at DESC, score DESC LIMIT ?",
+                (strategy, limit))
+        return fetchall(con,
+            "SELECT * FROM predictions ORDER BY created_at DESC, score DESC LIMIT ?",
+            (limit,))
+
+
+def get_due_unscored(now_iso: str, limit: int = 200) -> list[dict]:
+    """Predictions whose horizon has elapsed and which haven't been scored yet."""
+    with get_conn() as con:
+        return fetchall(con,
+            "SELECT * FROM predictions WHERE scored_at IS NULL AND due_at<=? ORDER BY due_at LIMIT ?",
+            (now_iso, limit))
+
+
+def record_score(pred_id: int, scored_at: str, exit_price: float | None,
+                 stock_return: float | None, bench_return: float | None,
+                 excess_return: float | None, hit: int | None) -> None:
+    with get_conn() as con:
+        execute(con,
+            """UPDATE predictions SET scored_at=?, exit_price=?, stock_return=?,
+               bench_return=?, excess_return=?, hit=? WHERE id=?""",
+            (scored_at, exit_price, stock_return, bench_return,
+             excess_return, hit, pred_id))
+
+
+def scoreboard(strategy: str | None = None) -> dict:
+    """Aggregate live track record over scored predictions."""
+    where = "WHERE scored_at IS NOT NULL"
+    params: tuple = ()
+    if strategy:
+        where += " AND strategy=?"
+        params = (strategy,)
+    with get_conn() as con:
+        rows = fetchall(con, f"SELECT * FROM predictions {where}", params)
+    n = len(rows)
+    if n == 0:
+        return {"n_scored": 0, "hit_rate": None, "avg_excess": None,
+                "avg_stock": None, "avg_bench": None}
+    hits = sum(1 for r in rows if r.get("hit") == 1)
+    def _avg(key):
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return sum(vals) / len(vals) if vals else None
+    return {
+        "n_scored": n,
+        "hit_rate": hits / n,
+        "avg_excess": _avg("excess_return"),
+        "avg_stock": _avg("stock_return"),
+        "avg_bench": _avg("bench_return"),
+    }

@@ -286,3 +286,86 @@ export async function fetchScreen(
   });
   return data;
 }
+
+// ── Catalyst strategy (event-driven, tracked) ────────────────────────────────
+
+export interface CatalystPick {
+  rank: number;
+  ticker: string;
+  market: string;
+  name: string;
+  score: number;
+  thesis: string;
+  catalyst_type?: string;
+  direction?: string;
+}
+
+export interface CatalystRunResponse {
+  status: string; // "ok" | "running" | "error"
+  message?: string;
+  market?: string;
+  horizon_days?: number;
+  n_scored_due?: number;
+  n_stored?: number;
+  picks?: CatalystPick[];
+  as_of?: string | null;
+  disclaimer?: string;
+}
+
+export interface CatalystScoreboard {
+  n_scored: number;
+  hit_rate: number | null;
+  avg_excess: number | null;
+  avg_stock: number | null;
+  avg_bench: number | null;
+}
+
+export async function fetchCatalystRun(
+  market = "KOSDAQ",
+  horizonDays = 21,
+  limit = 10,
+): Promise<CatalystRunResponse> {
+  const { data } = await api.get<CatalystRunResponse>("/catalyst/run", {
+    params: { market, horizon_days: horizonDays, limit },
+    timeout: 300_000,
+  });
+  return data;
+}
+
+export async function fetchCatalystScoreboard(
+  strategy = "catalyst",
+): Promise<CatalystScoreboard> {
+  const { data } = await api.get<CatalystScoreboard>("/catalyst/scoreboard", {
+    params: { strategy },
+  });
+  return data;
+}
+
+export interface PredictionRecord {
+  id: number;
+  ticker: string;
+  market: string;
+  name: string | null;
+  created_at: string;
+  horizon_days: number;
+  due_at: string;
+  score: number | null;
+  rank: number | null;
+  thesis: string | null;
+  entry_price: number | null;
+  scored_at: string | null;
+  stock_return: number | null;
+  bench_return: number | null;
+  excess_return: number | null;
+  hit: number | null;
+}
+
+export async function fetchCatalystHistory(
+  strategy = "catalyst",
+  limit = 100,
+): Promise<{ predictions: PredictionRecord[]; count: number }> {
+  const { data } = await api.get("/catalyst/history", {
+    params: { strategy, limit },
+  });
+  return data;
+}
