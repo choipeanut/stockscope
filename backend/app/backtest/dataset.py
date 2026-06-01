@@ -153,12 +153,22 @@ def build_dataset(
         index_map = {m: _load_index(m, lookback_days) for m in markets}
 
     # Lazily fetch DART history for the tickers we actually have prices for.
+    # Parallelised: fetching 30+ tickers × 6 years serially could take 10+ min.
     if include_dart and dart_history is None:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         from app.collectors.dart_fundamentals import get_kr_fundamental_history
+        kr_tickers = [t for (t, m) in price_map if m == "KOSDAQ"]
+        dart_years = int(years) + 1
         dart_history = {}
-        for (t, m) in price_map:
-            if m == "KOSDAQ":
-                dart_history[t] = get_kr_fundamental_history(t, years=int(years) + 1)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futs = {pool.submit(get_kr_fundamental_history, t, dart_years): t
+                   for t in kr_tickers}
+            for fut in as_completed(futs):
+                t = futs[fut]
+                try:
+                    dart_history[t] = fut.result()
+                except Exception:
+                    dart_history[t] = pd.DataFrame()
 
     trading_dates = _all_trading_dates(price_map)
     if not trading_dates:
