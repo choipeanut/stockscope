@@ -28,6 +28,19 @@ from app.backtest.dataset import FEATURE_COLS
 
 logger = logging.getLogger(__name__)
 
+# Columns that are never features (metadata + target).
+_META_COLS = {"date", "ticker", "market", "fwd_return", "label"}
+
+
+def feature_columns(df: pd.DataFrame) -> list[str]:
+    """Feature columns present in `df` (everything that isn't metadata/target).
+
+    Lets a Korea-only dataset with extra DART columns train without any caller
+    changes; falls back to the canonical price FEATURE_COLS if df is empty.
+    """
+    cols = [c for c in df.columns if c not in _META_COLS]
+    return cols or list(FEATURE_COLS)
+
 
 @dataclass
 class LogisticModel:
@@ -57,7 +70,8 @@ def train_logistic(
     epochs: int = 500,
 ) -> LogisticModel:
     """Train standardized logistic regression by full-batch gradient descent."""
-    X = df[FEATURE_COLS].to_numpy(dtype=float)
+    features = feature_columns(df)
+    X = df[features].to_numpy(dtype=float)
     y = df["label"].to_numpy(dtype=float)
 
     mean = X.mean(axis=0)
@@ -76,7 +90,7 @@ def train_logistic(
         w -= lr * grad_w
         b -= lr * grad_b
 
-    return LogisticModel(weights=w, bias=b, mean=mean, std=std)
+    return LogisticModel(weights=w, bias=b, mean=mean, std=std, features=features)
 
 
 def _rank_ic(prob: np.ndarray, fwd: np.ndarray) -> float | None:
@@ -173,7 +187,7 @@ def walk_forward_eval(
     # final model on all data for reporting feature weights
     final = train_logistic(df) if df["label"].nunique() >= 2 else None
     fw = (
-        {f: round(float(w), 4) for f, w in zip(FEATURE_COLS, final.weights)}
+        {f: round(float(w), 4) for f, w in zip(final.features, final.weights)}
         if final is not None else {}
     )
 

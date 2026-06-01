@@ -57,13 +57,16 @@ _dataset_cache: dict[str, tuple[float, object]] = {}
 
 def _get_dataset(market_filter, years, rebalance_days, holding_days):
     from app.backtest.dataset import build_dataset
-    key = f"ds:{market_filter}:{years}:{rebalance_days}:{holding_days}"
+    # Korea-only request → enrich with point-in-time DART fundamentals.
+    include_dart = market_filter == "KOSDAQ"
+    key = f"ds:{market_filter}:{years}:{rebalance_days}:{holding_days}:dart={include_dart}"
     cached = _dataset_cache.get(key)
     if cached and (time.time() - cached[0]) < _CACHE_TTL:
         return cached[1]
     df = build_dataset(
         market=market_filter, years=years,
         rebalance_days=rebalance_days, holding_days=holding_days,
+        include_dart=include_dart,
     )
     _dataset_cache[key] = (time.time(), df)
     return df
@@ -148,7 +151,7 @@ def predict_eval(
 def _run_predict(key, market_filter, years, holding_days, limit):
     from datetime import datetime, timezone
     import pandas as pd
-    from app.backtest.dataset import _features_at
+    from app.backtest.dataset import _dart_features_at, _features_at
     from app.backtest.engine import _load_index, _load_prices, _slice_up_to
     from app.backtest.model import train_logistic
     from app.collectors.company_name import get_company_name
@@ -164,12 +167,21 @@ def _run_predict(key, market_filter, years, holding_days, limit):
             return
 
         model = train_logistic(df)
+        include_dart = market_filter == "KOSDAQ"
         lookback_days = int(years * 365) + 200
         tickers = get_universe(market_filter)
         price_map = _load_prices(tickers, lookback_days)
         markets = {m for (_, m) in price_map}
         index_map = {m: _load_index(m, lookback_days) for m in markets}
 
+        dart_hist = {}
+        if include_dart:
+            from app.collectors.dart_fundamentals import get_kr_fundamental_history
+            for (t, m) in price_map:
+                if m == "KOSDAQ":
+                    dart_hist[t] = get_kr_fundamental_history(t, years=int(years) + 1)
+
+        today = datetime.now(timezone.utc).date()
         preds: list[dict] = []
         for (t, m), pdf in price_map.items():
             # date columns are already clean datetime64 from _load_prices/_load_index
@@ -178,6 +190,11 @@ def _run_predict(key, market_filter, years, holding_days, limit):
             feats = _features_at(_slice_up_to(pdf, pdf["date"].max()), idx_sl)
             if feats is None:
                 continue
+            if include_dart:
+                dart_feats = _dart_features_at(dart_hist.get(t), today)
+                if dart_feats is None:
+                    continue
+                feats = {**feats, **dart_feats}
             prob = float(model.predict_proba(pd.DataFrame([feats]))[0])
             name = next((i.get("name", "") for i in tickers if i["ticker"] == t), "")
             name = name or get_company_name(t, m)
