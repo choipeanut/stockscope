@@ -114,9 +114,11 @@ def backtest(
 def _run_predict_eval(key, market_filter, years, rebalance_days, holding_days, n_splits):
     from dataclasses import asdict as _asdict
     from app.backtest.model import walk_forward_eval
+    from app.services.heavy import heavy_slot
     try:
-        df = _get_dataset(market_filter, years, rebalance_days, holding_days)
-        report = walk_forward_eval(df, n_splits=n_splits)
+        with heavy_slot():  # serialise vs other heavy jobs to bound peak memory
+            df = _get_dataset(market_filter, years, rebalance_days, holding_days)
+            report = walk_forward_eval(df, n_splits=n_splits)
         payload = {
             "market": market_filter or "ALL",
             "n_samples": int(len(df)),
@@ -165,6 +167,8 @@ def _run_predict(key, market_filter, years, holding_days, limit):
     from app.backtest.model import train_logistic
     from app.collectors.company_name import get_company_name
     from app.collectors.universe import get_universe
+    from app.services.heavy import _heavy_lock
+    _heavy_lock.acquire()  # serialise vs other heavy jobs to bound peak memory
     try:
         df = _get_dataset(market_filter, years, 21, holding_days)
         if df.empty or df["label"].nunique() < 2:
@@ -258,6 +262,8 @@ def _run_predict(key, market_filter, years, holding_days, limit):
     except Exception as e:
         logger.warning("[predict] failed: %s", e, exc_info=True)
         _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
+    finally:
+        _heavy_lock.release()
 
 
 # ---------------------------------------------------------------------------
