@@ -33,8 +33,8 @@ export function PredictPanel({ onDrillDown }: Props) {
   const [horizon, setHorizon] = useState(21);
   const [triggered, setTriggered] = useState(false);
 
-  // Eval fires first (caches the dataset). Predict fires after eval succeeds.
-  // Both poll every 8s while status="running" (background thread pattern).
+  // Eval fires first (builds & caches dataset on server). Predict fires only
+  // after eval is fully done. Both poll every 8s while status="running".
   const evalQ = useQuery({
     queryKey: ["predict-eval", market, horizon],
     queryFn: () => fetchPredictEval(market || undefined, horizon),
@@ -42,10 +42,10 @@ export function PredictPanel({ onDrillDown }: Props) {
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchInterval: (query) =>
-      (query.state.data as any)?.status === "running" ? 8_000 : false,
+      query.state.data?.status === "running" ? 8_000 : false,
   });
 
-  const evalDone = evalQ.isSuccess && (evalQ.data as any)?.status !== "running";
+  const evalDone = evalQ.isSuccess && evalQ.data?.status !== "running" && !!evalQ.data?.report;
 
   const predict = useQuery({
     queryKey: ["predict", market, horizon],
@@ -57,8 +57,10 @@ export function PredictPanel({ onDrillDown }: Props) {
       (query.state.data as any)?.status === "running" ? 8_000 : false,
   });
 
-  const rows: PredictionRow[] = predict.data?.predictions ?? [];
-  const report = evalQ.data?.report;
+  const rows: PredictionRow[] = (predict.data as any)?.status === "ok"
+    ? (predict.data?.predictions ?? [])
+    : [];
+  const report = evalDone ? evalQ.data?.report : undefined;
 
   return (
     <div style={{ color: "#f9fafb" }}>
@@ -103,12 +105,11 @@ export function PredictPanel({ onDrillDown }: Props) {
         >
           예측 실행
         </button>
-        {(evalQ.isFetching || predict.isFetching ||
-          (evalQ.data as any)?.status === "running" ||
-          (predict.data as any)?.status === "running") && (
-          <span style={{ color: "#9ca3af", fontSize: 13 }}>
-            {!evalDone ? "모델 검증 중…" : "종목 랭킹 생성 중…"} (1~3분 소요, 자동 갱신)
-          </span>
+        {triggered && (evalQ.isFetching || evalQ.data?.status === "running") && (
+          <span style={{ color: "#9ca3af", fontSize: 13 }}>⏳ 모델 검증 중… (자동 갱신)</span>
+        )}
+        {evalDone && (predict.isFetching || (predict.data as any)?.status === "running") && (
+          <span style={{ color: "#9ca3af", fontSize: 13 }}>⏳ 종목 랭킹 생성 중… (자동 갱신)</span>
         )}
       </div>
 

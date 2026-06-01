@@ -247,6 +247,8 @@ export async function fetchPredict(
 }
 
 export interface PredictEvalResponse {
+  status?: string;
+  message?: string;
   market: string;
   n_samples: number;
   report: {
