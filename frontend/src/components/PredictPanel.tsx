@@ -19,6 +19,11 @@ const FEATURE_LABELS: Record<string, string> = {
   realized_vol: "저변동성",
   vol_ratio: "거래량비율",
   price_accel: "모멘텀가속",
+  f_revenue_growth: "매출성장",
+  f_profit_growth: "이익성장",
+  f_roe: "ROE",
+  f_op_margin: "영업이익률",
+  f_debt_ratio: "부채비율",
 };
 
 function probColor(p: number): string {
