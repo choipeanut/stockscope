@@ -68,6 +68,9 @@ def _get_dataset(market_filter, years, rebalance_days, holding_days):
         rebalance_days=rebalance_days, holding_days=holding_days,
         include_dart=include_dart,
     )
+    # Keep only the most recent dataset in memory — on a 512 MB box, retaining
+    # several full panels (one per market/horizon) is enough to OOM.
+    _dataset_cache.clear()
     _dataset_cache[key] = (time.time(), df)
     return df
 

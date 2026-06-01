@@ -163,7 +163,7 @@ def build_dataset(
         kr_tickers = [t for (t, m) in price_map if m == "KOSDAQ"]
         dart_years = int(years) + 1
         dart_history = {}
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             futs = {pool.submit(get_kr_fundamental_history, t, dart_years): t
                    for t in kr_tickers}
             for fut in as_completed(futs):

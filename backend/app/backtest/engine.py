@@ -106,16 +106,27 @@ def _load_prices(
         try:
             df = get_ohlcv(t, m, period_days=lookback_days)
             if df is not None and not df.empty:
-                df = df.copy()
+                # Keep only the columns the backtest needs — drops memory footprint
+                # on a 512 MB box where 40 full OHLCV frames can OOM.
+                keep = [c for c in ["date", "close", "high", "low", "volume"] if c in df.columns]
+                df = df[keep].copy()
                 df["date"] = pd.to_datetime(df["date"], errors="coerce")
                 df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+                # downcast numerics: float64 → float32, int64 → int32
+                for c in df.columns:
+                    if c == "date":
+                        continue
+                    if str(df[c].dtype).startswith("float"):
+                        df[c] = df[c].astype("float32")
+                    elif str(df[c].dtype).startswith("int"):
+                        df[c] = df[c].astype("int32")
                 return (t, m), df
         except Exception as e:
             logger.debug("backtest: price fetch failed %s/%s: %s", t, m, e)
         return None
 
     out: dict[tuple[str, str], pd.DataFrame] = {}
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futs = [pool.submit(_fetch_one, item) for item in tickers]
         for fut in as_completed(futs):
             result = fut.result()
