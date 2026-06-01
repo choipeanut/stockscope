@@ -33,23 +33,28 @@ export function PredictPanel({ onDrillDown }: Props) {
   const [horizon, setHorizon] = useState(21);
   const [triggered, setTriggered] = useState(false);
 
-  // Eval runs first; it builds & caches the dataset. Predict runs only after
-  // eval settles, so it reuses the cached dataset instead of doing the heavy
-  // multi-year fetch a second time (which timed out on the small server).
+  // Eval fires first (caches the dataset). Predict fires after eval succeeds.
+  // Both poll every 8s while status="running" (background thread pattern).
   const evalQ = useQuery({
     queryKey: ["predict-eval", market, horizon],
     queryFn: () => fetchPredictEval(market || undefined, horizon),
     enabled: triggered,
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      (query.state.data as any)?.status === "running" ? 8_000 : false,
   });
+
+  const evalDone = evalQ.isSuccess && (evalQ.data as any)?.status !== "running";
 
   const predict = useQuery({
     queryKey: ["predict", market, horizon],
     queryFn: () => fetchPredict(market || undefined, horizon),
-    enabled: triggered && !evalQ.isFetching && evalQ.isSuccess,
+    enabled: triggered && evalDone,
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      (query.state.data as any)?.status === "running" ? 8_000 : false,
   });
 
   const rows: PredictionRow[] = predict.data?.predictions ?? [];
@@ -98,9 +103,11 @@ export function PredictPanel({ onDrillDown }: Props) {
         >
           예측 실행
         </button>
-        {(predict.isFetching || evalQ.isFetching) && (
+        {(evalQ.isFetching || predict.isFetching ||
+          (evalQ.data as any)?.status === "running" ||
+          (predict.data as any)?.status === "running") && (
           <span style={{ color: "#9ca3af", fontSize: 13 }}>
-            모델 학습 중… (첫 실행은 1~3분 소요)
+            {!evalDone ? "모델 검증 중…" : "종목 랭킹 생성 중…"} (1~3분 소요, 자동 갱신)
           </span>
         )}
       </div>

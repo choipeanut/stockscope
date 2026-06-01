@@ -1,13 +1,13 @@
-"""GET /backtest — point-in-time factor backtest (Phase 0).
+"""GET /backtest, /predict/eval, /predict — prediction & backtest endpoints.
 
-Validates whether the factor score actually predicts forward returns, using
-walk-forward evaluation with no future leakage. Runs synchronously but can be
-slow on cold cache (fetches multi-year OHLCV for the whole universe), so a
-short in-memory cache is applied per parameter set.
+All heavy endpoints (predict, predict/eval) run in a background thread and
+return immediately with status="running". The client polls until status="ok".
+This mirrors the /screen pattern and avoids gateway timeouts on small servers.
 """
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import asdict
 
@@ -18,166 +18,212 @@ from app.backtest.engine import run_backtest
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_CACHE: dict[str, tuple[float, dict]] = {}
-_CACHE_TTL = 3600  # 1 hour — backtests are expensive and don't change intraday
+_CACHE_TTL = 3600  # 1 hour
 
-# Shared point-in-time dataset cache, keyed by (market, years, rebalance, holding).
-# Both /predict and /predict/eval build the SAME dataset; caching it here avoids
-# re-fetching multi-year OHLCV for the whole universe twice (the cause of the
-# /predict timeout on small servers).
-_DATASET_CACHE: dict[str, tuple[float, object]] = {}
+# ---------------------------------------------------------------------------
+# Shared in-memory store: key → {status, payload, started_at}
+# ---------------------------------------------------------------------------
+_store: dict[str, dict] = {}
+_locks: dict[str, threading.Lock] = {}
+
+
+def _get_lock(key: str) -> threading.Lock:
+    if key not in _locks:
+        _locks[key] = threading.Lock()
+    return _locks[key]
+
+
+def _is_fresh(key: str) -> bool:
+    entry = _store.get(key)
+    if not entry or entry["status"] != "ok":
+        return False
+    return (time.time() - entry["ts"]) < _CACHE_TTL
+
+
+def _is_running(key: str) -> bool:
+    entry = _store.get(key)
+    return bool(entry and entry["status"] == "running")
+
+
+def _running_response(msg: str) -> dict:
+    return {"status": "running", "message": msg}
+
+
+# ---------------------------------------------------------------------------
+# Shared dataset cache (avoid rebuilding for /predict after /predict/eval)
+# ---------------------------------------------------------------------------
+_dataset_cache: dict[str, tuple[float, object]] = {}
 
 
 def _get_dataset(market_filter, years, rebalance_days, holding_days):
-    """Build (or reuse) the point-in-time dataset for these parameters."""
     from app.backtest.dataset import build_dataset
-
     key = f"ds:{market_filter}:{years}:{rebalance_days}:{holding_days}"
-    cached = _DATASET_CACHE.get(key)
+    cached = _dataset_cache.get(key)
     if cached and (time.time() - cached[0]) < _CACHE_TTL:
         return cached[1]
     df = build_dataset(
         market=market_filter, years=years,
         rebalance_days=rebalance_days, holding_days=holding_days,
     )
-    _DATASET_CACHE[key] = (time.time(), df)
+    _dataset_cache[key] = (time.time(), df)
     return df
 
 
-def _build_eval(market_filter, years, rebalance_days, holding_days, n_splits):
-    """Build dataset + walk-forward report (imported lazily to keep import cheap)."""
-    from app.backtest.model import walk_forward_eval
-
-    df = _get_dataset(market_filter, years, rebalance_days, holding_days)
-    report = walk_forward_eval(df, n_splits=n_splits)
-    return df, report
-
-
+# ---------------------------------------------------------------------------
+# /backtest  (synchronous — smaller computation)
+# ---------------------------------------------------------------------------
 @router.get("/backtest")
 def backtest(
-    market: str = Query("", description="KOSDAQ | NASDAQ | (empty = both)"),
-    factor: str = Query("momentum", description="point-in-time factor to test"),
+    market: str = Query(""),
+    factor: str = Query("momentum"),
     years: float = Query(3.0, ge=0.5, le=10.0),
     rebalance_days: int = Query(21, ge=5, le=120),
     holding_days: int = Query(21, ge=5, le=120),
     n_quantiles: int = Query(5, ge=2, le=10),
 ) -> dict:
     market_filter = market.upper() if market else None
-    key = f"{market_filter}:{factor}:{years}:{rebalance_days}:{holding_days}:{n_quantiles}"
-
-    cached = _CACHE.get(key)
-    if cached and (time.time() - cached[0]) < _CACHE_TTL:
-        return {**cached[1], "cached": True}
+    key = f"bt:{market_filter}:{factor}:{years}:{rebalance_days}:{holding_days}:{n_quantiles}"
+    if _is_fresh(key):
+        return {**_store[key]["payload"], "cached": True}
 
     result = run_backtest(
-        market=market_filter,
-        factor=factor,
-        years=years,
-        rebalance_days=rebalance_days,
-        holding_days=holding_days,
+        market=market_filter, factor=factor, years=years,
+        rebalance_days=rebalance_days, holding_days=holding_days,
         n_quantiles=n_quantiles,
     )
     payload = asdict(result)
-    _CACHE[key] = (time.time(), payload)
+    _store[key] = {"status": "ok", "payload": payload, "ts": time.time()}
     return {**payload, "cached": False}
+
+
+# ---------------------------------------------------------------------------
+# /predict/eval  — background build + walk-forward eval
+# ---------------------------------------------------------------------------
+def _run_predict_eval(key, market_filter, years, rebalance_days, holding_days, n_splits):
+    from dataclasses import asdict as _asdict
+    from app.backtest.model import walk_forward_eval
+    try:
+        df = _get_dataset(market_filter, years, rebalance_days, holding_days)
+        report = walk_forward_eval(df, n_splits=n_splits)
+        payload = {
+            "market": market_filter or "ALL",
+            "n_samples": int(len(df)),
+            "report": _asdict(report),
+        }
+        _store[key] = {"status": "ok", "payload": payload, "ts": time.time()}
+        logger.info("[predict/eval] done: %s", key)
+    except Exception as e:
+        logger.warning("[predict/eval] failed: %s", e)
+        _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
 
 
 @router.get("/predict/eval")
 def predict_eval(
-    market: str = Query("", description="KOSDAQ | NASDAQ | (empty = both)"),
+    market: str = Query(""),
     years: float = Query(5.0, ge=1.0, le=10.0),
     rebalance_days: int = Query(21, ge=5, le=120),
     holding_days: int = Query(21, ge=5, le=120),
     n_splits: int = Query(4, ge=1, le=10),
 ) -> dict:
-    """Walk-forward, out-of-sample evaluation of the prediction model.
-
-    Answers: does the trained model beat chance on data it never saw?
-    """
-    from dataclasses import asdict as _asdict
-
     market_filter = market.upper() if market else None
     key = f"eval:{market_filter}:{years}:{rebalance_days}:{holding_days}:{n_splits}"
-    cached = _CACHE.get(key)
-    if cached and (time.time() - cached[0]) < _CACHE_TTL:
-        return {**cached[1], "cached": True}
 
-    df, report = _build_eval(market_filter, years, rebalance_days, holding_days, n_splits)
-    payload = {
-        "market": market_filter or "ALL",
-        "n_samples": int(len(df)),
-        "report": _asdict(report),
-    }
-    _CACHE[key] = (time.time(), payload)
-    return {**payload, "cached": False}
+    if _is_fresh(key):
+        return {**_store[key]["payload"], "cached": True}
+    if _is_running(key):
+        return _running_response("모델 검증 중…")
+
+    _store[key] = {"status": "running", "payload": {}, "ts": time.time()}
+    threading.Thread(
+        target=_run_predict_eval,
+        args=(key, market_filter, years, rebalance_days, holding_days, n_splits),
+        daemon=True, name="predict-eval-bg",
+    ).start()
+    return _running_response("모델 검증 시작됨 — 1~3분 소요. 자동으로 폴링합니다.")
+
+
+# ---------------------------------------------------------------------------
+# /predict  — background train + rank current universe
+# ---------------------------------------------------------------------------
+def _run_predict(key, market_filter, years, holding_days, limit):
+    from datetime import datetime, timezone
+    import pandas as pd
+    from app.backtest.dataset import _features_at
+    from app.backtest.engine import _load_index, _load_prices, _slice_up_to
+    from app.backtest.model import train_logistic
+    from app.collectors.company_name import get_company_name
+    from app.collectors.universe import get_universe
+    try:
+        df = _get_dataset(market_filter, years, 21, holding_days)
+        if df.empty or df["label"].nunique() < 2:
+            _store[key] = {
+                "status": "ok",
+                "payload": {"status": "insufficient_data", "predictions": [], "as_of": None},
+                "ts": time.time(),
+            }
+            return
+
+        model = train_logistic(df)
+        lookback_days = int(years * 365) + 200
+        tickers = get_universe(market_filter)
+        price_map = _load_prices(tickers, lookback_days)
+        markets = {m for (_, m) in price_map}
+        index_map = {m: _load_index(m, lookback_days) for m in markets}
+
+        preds: list[dict] = []
+        for (t, m), pdf in price_map.items():
+            idx = index_map.get(m)
+            idx_sl = _slice_up_to(idx, idx["date"].max()) if idx is not None else None
+            feats = _features_at(_slice_up_to(pdf, pdf["date"].max()), idx_sl)
+            if feats is None:
+                continue
+            prob = float(model.predict_proba(pd.DataFrame([feats]))[0])
+            name = next((i.get("name", "") for i in tickers if i["ticker"] == t), "")
+            name = name or get_company_name(t, m)
+            preds.append({
+                "ticker": t, "market": m, "name": name,
+                "probability": round(prob, 4),
+                "features": {k: round(v, 2) for k, v in feats.items()},
+            })
+
+        preds.sort(key=lambda r: r["probability"], reverse=True)
+        payload = {
+            "status": "ok",
+            "market": market_filter or "ALL",
+            "horizon_days": holding_days,
+            "n_train_samples": int(len(df)),
+            "predictions": preds[:limit],
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "disclaimer": (
+                "확률은 모델 추정치이며 투자 권유가 아닙니다. 실제 예측력은 /predict/eval 참조."
+            ),
+        }
+        _store[key] = {"status": "ok", "payload": payload, "ts": time.time()}
+        logger.info("[predict] done: %d preds", len(preds))
+    except Exception as e:
+        logger.warning("[predict] failed: %s", e)
+        _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
 
 
 @router.get("/predict")
 def predict(
-    market: str = Query("", description="KOSDAQ | NASDAQ | (empty = both)"),
+    market: str = Query(""),
     years: float = Query(5.0, ge=1.0, le=10.0),
     holding_days: int = Query(21, ge=5, le=120),
     limit: int = Query(50, ge=1, le=200),
 ) -> dict:
-    """Train on all history, then rank the CURRENT universe by predicted
-    probability of beating the cross-section over the next `holding_days`.
-
-    Output probabilities are honest model estimates, not guarantees — see the
-    /predict/eval endpoint for the model's true out-of-sample skill.
-    """
-    from datetime import datetime, timezone
-
-    from app.backtest.dataset import _features_at
-    from app.backtest.engine import (
-        _load_index,
-        _load_prices,
-        _slice_up_to,
-    )
-    from app.backtest.model import train_logistic
-    from app.collectors.company_name import get_company_name
-    from app.collectors.universe import get_universe
-
     market_filter = market.upper() if market else None
+    key = f"pred:{market_filter}:{years}:{holding_days}:{limit}"
 
-    # 1) train on the full point-in-time dataset (shared cache → no double build)
-    df = _get_dataset(market_filter, years, 21, holding_days)
-    if df.empty or df["label"].nunique() < 2:
-        return {"status": "insufficient_data", "predictions": [], "as_of": None}
-    model = train_logistic(df)
+    if _is_fresh(key):
+        return {**_store[key]["payload"], "cached": True}
+    if _is_running(key):
+        return _running_response("종목 랭킹 생성 중…")
 
-    # 2) score the CURRENT universe (features as of today)
-    lookback_days = int(years * 365) + 200
-    tickers = get_universe(market_filter)
-    price_map = _load_prices(tickers, lookback_days)
-    markets = {m for (_, m) in price_map}
-    index_map = {m: _load_index(m, lookback_days) for m in markets}
-
-    preds: list[dict] = []
-    for (t, m), pdf in price_map.items():
-        idx = index_map.get(m)
-        feats = _features_at(_slice_up_to(pdf, pdf["date"].max()),
-                             _slice_up_to(idx, idx["date"].max()) if idx is not None else None)
-        if feats is None:
-            continue
-        import pandas as pd
-        prob = float(model.predict_proba(pd.DataFrame([feats]))[0])
-        name = next((i.get("name", "") for i in tickers if i["ticker"] == t), "")
-        name = name or get_company_name(t, m)
-        preds.append({
-            "ticker": t, "market": m, "name": name,
-            "probability": round(prob, 4),
-            "features": {k: round(v, 2) for k, v in feats.items()},
-        })
-
-    preds.sort(key=lambda r: r["probability"], reverse=True)
-    return {
-        "status": "ok",
-        "market": market_filter or "ALL",
-        "horizon_days": holding_days,
-        "n_train_samples": int(len(df)),
-        "predictions": preds[:limit],
-        "as_of": datetime.now(timezone.utc).isoformat(),
-        "disclaimer": (
-            "확률은 모델 추정치이며 투자 권유가 아닙니다. 실제 예측력은 /predict/eval 참조."
-        ),
-    }
+    _store[key] = {"status": "running", "payload": {}, "ts": time.time()}
+    threading.Thread(
+        target=_run_predict,
+        args=(key, market_filter, years, holding_days, limit),
+        daemon=True, name="predict-bg",
+    ).start()
+    return _running_response("예측 시작됨 — 1~3분 소요. 자동으로 폴링합니다.")
