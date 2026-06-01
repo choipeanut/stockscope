@@ -72,6 +72,7 @@ def test_get_history_caches_json_safe(monkeypatch):
     """Full path incl. cache.set with date → ISO string (the 500-bug regression)."""
     monkeypatch.setenv("DART_API_KEY", "dummy")
     monkeypatch.setattr(df_mod, "make_reader", lambda key: _FakeReader())
+    monkeypatch.setattr(df_mod, "_shared_reader", None)  # reset process singleton
     store: dict = {}
     monkeypatch.setattr(df_mod.cache, "set",
                         lambda k, v, ttl: store.__setitem__(k, v))

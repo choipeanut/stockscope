@@ -85,6 +85,27 @@ def make_reader(dart_key: str):
     return cls(dart_key)
 
 
+# A single shared reader per process. OpenDartReader loads the ENTIRE Korean
+# corp_codes table (tens of thousands of rows) on construction; building one
+# per ticker — especially across parallel workers — stacks several copies of
+# that table in memory and OOMs a 512 MB box. We build it once, guarded by a
+# lock, and reuse it for every ticker.
+import threading as _threading
+
+_reader_lock = _threading.Lock()
+_shared_reader = None
+
+
+def get_shared_reader(dart_key: str):
+    """Return a process-wide singleton OpenDartReader (one corp_codes table)."""
+    global _shared_reader
+    if _shared_reader is None:
+        with _reader_lock:
+            if _shared_reader is None:
+                _shared_reader = make_reader(dart_key)
+    return _shared_reader
+
+
 def _to_float(v) -> float | None:
     if v is None:
         return None
@@ -186,7 +207,7 @@ def get_kr_fundamental_history(ticker: str, years: int = 6) -> pd.DataFrame:
 
     rows: list[dict] = []
     try:
-        dr = make_reader(dart_key)
+        dr = get_shared_reader(dart_key)  # shared singleton — one corp_codes table
         codes = dr.corp_codes
         match = codes[codes["stock_code"] == ticker]
         if match is None or match.empty:
