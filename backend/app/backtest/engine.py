@@ -126,7 +126,7 @@ def _load_prices(
         return None
 
     out: dict[tuple[str, str], pd.DataFrame] = {}
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         futs = [pool.submit(_fetch_one, item) for item in tickers]
         for fut in as_completed(futs):
             result = fut.result()

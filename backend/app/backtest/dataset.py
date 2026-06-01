@@ -148,6 +148,9 @@ def build_dataset(
     """
     lookback_days = int(years * 365) + 200
 
+    # Track whether we own these frames — only frames we created may be freed at
+    # the end (don't mutate a caller-supplied / test-injected map).
+    owns_frames = price_map is None
     if price_map is None:
         tickers = get_universe(market)
         price_map = _load_prices(tickers, lookback_days)
@@ -216,9 +219,22 @@ def build_dataset(
             r["label"] = 1 if r["fwd_return"] > med else 0
         rows.extend(day_rows)
 
+    # Free the raw price/index frames before building the result — on a 512 MB
+    # box holding both the panel and all OHLCV frames at once can OOM. Only
+    # touch frames we created ourselves.
+    import gc
+    if owns_frames:
+        price_map.clear()
+        index_map.clear()
+        if dart_history:
+            dart_history.clear()
+    gc.collect()
+
     feature_cols = [*FEATURE_COLS, *DART_FEATURE_COLS] if include_dart else list(FEATURE_COLS)
     cols = ["date", "ticker", "market", *feature_cols, "fwd_return", "label"]
     result = pd.DataFrame(rows, columns=cols)
+    rows.clear()
+    gc.collect()
 
     if include_dart and not result.empty:
         result = _impute_or_drop_dart(result)
