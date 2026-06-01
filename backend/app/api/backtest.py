@@ -159,6 +159,11 @@ def _run_predict(key, market_filter, years, holding_days, limit):
     try:
         df = _get_dataset(market_filter, years, 21, holding_days)
         if df.empty or df["label"].nunique() < 2:
+            logger.warning(
+                "[predict] insufficient data: market=%s years=%s holding=%s rows=%d labels=%s",
+                market_filter, years, holding_days,
+                len(df), df["label"].unique().tolist() if not df.empty else [],
+            )
             _store[key] = {
                 "status": "ok",
                 "payload": {"status": "insufficient_data", "predictions": [], "as_of": None},
