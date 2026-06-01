@@ -94,22 +94,34 @@ _FACTORS = {
 def _load_prices(
     tickers: list[dict], lookback_days: int
 ) -> dict[tuple[str, str], pd.DataFrame]:
-    """Fetch full-history OHLCV for each ticker, indexed by (ticker, market)."""
-    out: dict[tuple[str, str], pd.DataFrame] = {}
-    for item in tickers:
+    """Fetch full-history OHLCV for each ticker, indexed by (ticker, market).
+
+    Parallelised with ThreadPoolExecutor so 40+ tickers don't take 6+ min
+    serially (each pykrx-miss + FDR-fallback takes ~10 s on cold cache).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch_one(item):
         t, m = item["ticker"], item["market"]
         try:
             df = get_ohlcv(t, m, period_days=lookback_days)
             if df is not None and not df.empty:
                 df = df.copy()
-                # Force a true datetime64 dtype so the column can NEVER end up a
-                # mix of datetime.date / float / str (which breaks .max() and
-                # every comparison). errors="coerce" turns junk into NaT.
                 df["date"] = pd.to_datetime(df["date"], errors="coerce")
                 df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
-                out[(t, m)] = df
+                return (t, m), df
         except Exception as e:
             logger.debug("backtest: price fetch failed %s/%s: %s", t, m, e)
+        return None
+
+    out: dict[tuple[str, str], pd.DataFrame] = {}
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futs = [pool.submit(_fetch_one, item) for item in tickers]
+        for fut in as_completed(futs):
+            result = fut.result()
+            if result is not None:
+                key, df = result
+                out[key] = df
     return out
 
 
