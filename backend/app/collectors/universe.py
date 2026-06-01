@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 _CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
 _NASDAQ_CSV = _CONFIG_DIR / "nasdaq_universe.csv"
 
-# KOSPI 대형주 (삼성전자 등 거래소 상장) — 12종목 (512MB Render 한계 고려)
+# KOSPI 대형주 (삼성전자 등 거래소 상장) — 12종목
 _KOSPI_TOP = [
     {"ticker": "005930", "name": "삼성전자"},
     {"ticker": "000660", "name": "SK하이닉스"},

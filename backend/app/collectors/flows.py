@@ -9,10 +9,7 @@ _TTL = 3600  # 1 hour
 
 
 def _get_kr_flows(ticker: str) -> dict:
-    from pykrx import stock as pykrx_stock
-
-    end = datetime.now(timezone.utc).strftime("%Y%m%d")
-    start = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y%m%d")
+    import os
 
     result: dict = {
         "foreign_net_5d": None, "foreign_net_20d": None,
@@ -21,8 +18,15 @@ def _get_kr_flows(ticker: str) -> dict:
         "volume_ratio": None,  # avg 5d vol / avg 20d vol
         "short_ratio": None,
         "proxy": False,
-        "source": "pykrx", "available": True,
+        "source": "pykrx", "available": False,
     }
+    if not (os.environ.get("KRX_ID") and os.environ.get("KRX_PW")):
+        return result
+
+    from pykrx import stock as pykrx_stock
+    end = datetime.now(timezone.utc).strftime("%Y%m%d")
+    start = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y%m%d")
+    result["available"] = True
     try:
         df = pykrx_stock.get_market_trading_volume_by_date(start, end, ticker)
         if df is None or df.empty:

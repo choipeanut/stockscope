@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 1800          # 30분 캐시
 _WALL_TIMEOUT = 300        # 백그라운드 최대 5분 (모든 종목 커버)
-_MAX_WORKERS = 8
+_MAX_WORKERS = 2         # 동시 OHLCV+펀더멘털 로드 제한 (512MB 메모리 피크 억제)
 
 _last_result: dict | None = None
 _last_run_at: float = 0.0
@@ -35,6 +35,23 @@ _bg_thread: threading.Thread | None = None
 
 
 def _run_background(market_filter: str | None) -> None:
+    """Serialised against predict/catalyst via heavy_slot so concurrent heavy
+    jobs can't stack their memory peaks past the 512MB limit (which surfaces on
+    the client as a dropped connection / "network error")."""
+    from app.services.heavy import heavy_slot
+    try:
+        # drop_caches: free any retained predict dataset panel before we spike —
+        # the screener doesn't need it, and a resident panel is what tips a
+        # screener-only run over 512MB.
+        with heavy_slot(drop_caches=True):
+            _run_background_inner(market_filter)
+    except Exception as e:
+        global _running
+        logger.warning("[screener] background failed: %s", e, exc_info=True)
+        _running = False
+
+
+def _run_background_inner(market_filter: str | None) -> None:
     global _last_result, _last_run_at, _running
     logger.info("[screener] background start (market=%s)", market_filter)
 
@@ -74,6 +91,8 @@ def _run_background(market_filter: str | None) -> None:
     finally:
         pool.shutdown(wait=False)
 
+    import gc
+    gc.collect()
     results.sort(key=lambda r: r.get("composite") or 0, reverse=True)
 
     _last_result = {"results": results, "market": market_filter}

@@ -58,6 +58,17 @@ _dataset_cache: dict[str, tuple[float, object]] = {}
 _dataset_lock = threading.Lock()
 
 
+def _drop_dataset_cache() -> None:
+    """Free the retained dataset panel so non-predict heavy jobs (screener,
+    catalyst) don't OOM by stacking on top of an hour-old cached build."""
+    _dataset_cache.clear()
+
+
+# Let other heavy jobs reclaim this memory before they spike their own.
+from app.services.heavy import register_cache_dropper as _register_cache_dropper
+_register_cache_dropper(_drop_dataset_cache)
+
+
 def _get_dataset(market_filter, years, rebalance_days, holding_days):
     from app.backtest.dataset import build_dataset
     # Korea-only request → enrich with point-in-time DART fundamentals.
@@ -134,7 +145,7 @@ def _run_predict_eval(key, market_filter, years, rebalance_days, holding_days, n
 @router.get("/predict/eval")
 def predict_eval(
     market: str = Query(""),
-    years: float = Query(3.0, ge=1.0, le=10.0),
+    years: float = Query(5.0, ge=1.0, le=10.0),
     rebalance_days: int = Query(21, ge=5, le=120),
     holding_days: int = Query(21, ge=5, le=120),
     n_splits: int = Query(4, ge=1, le=10),
@@ -336,7 +347,7 @@ def dart_check(ticker: str = Query("005930"), year: int = Query(0)) -> dict:
 @router.get("/predict")
 def predict(
     market: str = Query(""),
-    years: float = Query(3.0, ge=1.0, le=10.0),
+    years: float = Query(5.0, ge=1.0, le=10.0),
     holding_days: int = Query(21, ge=5, le=120),
     limit: int = Query(50, ge=1, le=200),
 ) -> dict:

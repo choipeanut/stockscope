@@ -127,7 +127,7 @@ def _run_catalyst(key: str, market_filter: str, horizon_days: int, limit: int,
     """Background worker — serialised against other heavy jobs to bound memory."""
     from app.services.heavy import heavy_slot
     try:
-        with heavy_slot():
+        with heavy_slot(drop_caches=True):
             _build_catalyst_picks(key, market_filter, horizon_days, limit, use_claude)
     except Exception as e:
         logger.warning("[catalyst] failed: %s", e, exc_info=True)
