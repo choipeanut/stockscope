@@ -261,12 +261,25 @@ def dart_check(ticker: str = Query("005930"), year: int = Query(0)) -> dict:
     if not out["dart_api_key_present"]:
         return out
 
+    def _safe_records(df, cols, n):
+        """JSON-safe: every cell stringified, NaN → None (avoids numpy 500s)."""
+        recs = []
+        for _, r in df[cols].head(n).iterrows():
+            rec = {}
+            for c in cols:
+                v = r[c]
+                rec[c] = None if pd_isna(v) else str(v)
+            recs.append(rec)
+        return recs
+
     probe_year = year or (datetime.now(timezone.utc).year - 1)
     try:
+        import pandas as pd
+        pd_isna = pd.isna
         from app.collectors.dart_fundamentals import make_reader
         dr = make_reader(os.environ["DART_API_KEY"])
         codes = dr.corp_codes
-        out["corp_codes_columns"] = list(codes.columns)
+        out["corp_codes_columns"] = [str(c) for c in codes.columns]
         match = codes[codes["stock_code"] == ticker]
         out["corp_code_found"] = bool(match is not None and not match.empty)
         if out["corp_code_found"]:
@@ -279,25 +292,24 @@ def dart_check(ticker: str = Query("005930"), year: int = Query(0)) -> dict:
                     out["finstate_rows"] = 0
                 else:
                     out["finstate_rows"] = int(len(fs))
-                    out["finstate_columns"] = list(fs.columns)
-                    # sample of what accounts actually look like
+                    out["finstate_columns"] = [str(c) for c in fs.columns]
                     cols = [c for c in ["sj_div", "fs_div", "account_id", "account_nm",
                                         "thstrm_amount", "frmtrm_amount"] if c in fs.columns]
-                    out["sample_rows"] = fs[cols].head(25).astype(object).where(
-                        fs[cols].notna(), None
-                    ).to_dict("records")
+                    out["sample_rows"] = _safe_records(fs, cols, 25)
             except Exception as e:
                 out["finstate_error"] = f"{type(e).__name__}: {e}"
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
 
     # also run the real parser
-    hist = get_kr_fundamental_history(ticker, years=6)
-    out["rows_parsed"] = int(len(hist))
-    out["history"] = (
-        hist.astype(object).where(hist.notna(), None).to_dict("records")
-        if not hist.empty else []
-    )
+    try:
+        hist = get_kr_fundamental_history(ticker, years=6)
+        out["rows_parsed"] = int(len(hist))
+        out["history"] = (
+            _safe_records(hist, list(hist.columns), len(hist)) if not hist.empty else []
+        )
+    except Exception as e:
+        out["parser_error"] = f"{type(e).__name__}: {e}"
     return out
 
 
