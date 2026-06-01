@@ -136,10 +136,12 @@ def _slice_up_to(df: pd.DataFrame, as_of) -> pd.DataFrame:
     return df[d <= pd.to_datetime(as_of)]
 
 
-def _forward_return(df: pd.DataFrame, as_of: date, holding_days: int) -> float:
+def _forward_return(df: pd.DataFrame, as_of, holding_days: int) -> float:
     """Close-to-close return from the last bar <= as_of to ~holding_days later."""
-    past = df[df["date"] <= as_of]
-    future = df[df["date"] > as_of]
+    d = pd.to_datetime(df["date"], errors="coerce")
+    as_of_dt = pd.to_datetime(as_of)
+    past = df[d <= as_of_dt]
+    future = df[d > as_of_dt]
     if past.empty or future.empty:
         return float("nan")
     entry = float(past["close"].iloc[-1])
