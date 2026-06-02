@@ -43,6 +43,23 @@ def _fetch_nasdaq_name(ticker: str) -> str:
         return ""
 
 
+def _universe_name(ticker: str, market: str) -> str:
+    """유니버스(하드코딩 KR + NASDAQ CSV)에 있으면 네트워크 없이 즉시 반환.
+
+    대부분의 보유/스크리닝 종목은 유니버스에 있어 yfinance .info(느리고 Render에서
+    불안정) 호출을 건너뛸 수 있다."""
+    try:
+        from app.collectors.universe import get_universe
+        # KR 보유가 과거 버전에서 KOSDAQ/KOSPI 어느 쪽으로 저장됐든 잡도록 통합 조회
+        scope = "KR" if market in ("KOSDAQ", "KOSPI") else market
+        for item in get_universe(scope):
+            if item["ticker"].upper() == ticker and item.get("name"):
+                return str(item["name"])
+    except Exception:
+        pass
+    return ""
+
+
 def get_company_name(ticker: str, market: str) -> str:
     """종목 코드 → 회사명. 실패 시 빈 문자열."""
     t = ticker.upper()
@@ -52,6 +69,12 @@ def get_company_name(ticker: str, market: str) -> str:
     cached = _cache.get(key)
     if cached and time.time() < cached[1]:
         return cached[0]
+
+    # 0) 유니버스 우선 조회 (네트워크 없음, 가장 안정적)
+    name = _universe_name(t, market)
+    if name:
+        _cache[key] = (name, time.time() + _TTL)
+        return name
 
     if market in ("KOSDAQ", "KOSPI"):
         # FDR KRX 목록에서 조회
