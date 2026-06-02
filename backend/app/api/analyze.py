@@ -218,6 +218,7 @@ def analyze(
             "summary": market_sentiment_data.get("summary"),
             "key_themes": market_sentiment_data.get("key_themes", []),
             "available": market_sentiment_data.get("available", False),
+            "reason": market_sentiment_data.get("reason"),
         },
         "analyst_detail": {
             "mean_target":   _s(analyst_data.get("mean_target")),

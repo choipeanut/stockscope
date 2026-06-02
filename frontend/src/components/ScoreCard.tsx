@@ -105,7 +105,9 @@ function MarketSentimentCard({ detail }: { detail: MarketSentimentDetail }) {
             </span>
           </div>
         ) : (
-          <span style={{ fontSize: 12, color: "#6b7280" }}>NEWSAPI_KEY 필요</span>
+          <span style={{ fontSize: 12, color: "#6b7280" }}>
+            {detail.reason?.includes("ANTHROPIC") ? "ANTHROPIC_API_KEY 필요" : "키 필요"}
+          </span>
         )}
       </div>
 
@@ -154,11 +156,26 @@ function MarketSentimentCard({ detail }: { detail: MarketSentimentDetail }) {
 
       {!detail.available && (
         <div style={{ fontSize: 12, color: "#6b7280" }}>
-          NEWSAPI_KEY 설정 시 글로벌 시장 환경이 예측에 반영됩니다.
+          {detail.reason?.includes("ANTHROPIC")
+            ? "ANTHROPIC_API_KEY(Claude) 설정 시 글로벌 시장 환경이 분석됩니다."
+            : "NEWSAPI_KEY + ANTHROPIC_API_KEY 설정 시 글로벌 시장 환경이 반영됩니다."}
         </div>
       )}
     </div>
   );
+}
+
+/** 백엔드 unavailable reason → 사용자에게 정확한 안내.
+ * 뉴스 감성/시장 감성은 NewsAPI(기사 수집)가 아니라 Claude(분석)로 만들어진다 —
+ * 그래서 진짜 필요한 키는 보통 ANTHROPIC_API_KEY다. */
+function sentimentHint(reason?: string): string {
+  const r = reason ?? "";
+  if (r.includes("ANTHROPIC")) return "ANTHROPIC_API_KEY(Claude) 설정 시 뉴스 감성 분석이 켜집니다.";
+  if (r.includes("NEWSAPI") || r.includes("no global macro news"))
+    return "NEWSAPI_KEY 설정 시 거시 환경 뉴스가 반영됩니다.";
+  if (r.includes("no stock-specific") || r.includes("no items"))
+    return "이 종목의 최근 뉴스·공시가 없어 감성 분석을 건너뜁니다.";
+  return r ? `감성 분석 미사용: ${r}` : "뉴스 감성 분석을 사용할 수 없습니다.";
 }
 
 interface Props {
@@ -294,7 +311,7 @@ export function ScoreCard({ data }: Props) {
           </div>
         ) : !hasSentiment ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>
-            NEWSAPI_KEY 설정 시 거시 환경 뉴스까지 반영됩니다.
+            {sentimentHint(sentiment?.reason)}
           </div>
         ) : null}
 

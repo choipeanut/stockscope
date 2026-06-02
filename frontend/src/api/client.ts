@@ -56,6 +56,7 @@ export interface MarketSentimentDetail {
   summary: string;
   key_themes: string[];
   available: boolean;
+  reason?: string;
 }
 
 export interface MomentumDetail {
