@@ -86,7 +86,7 @@ def _fetch_dart_disclosures(ticker: str, limit: int = 10) -> list[dict]:
     if not dart_key:
         return []
     try:
-        from app.collectors.dart_fundamentals import make_reader
+        from app.collectors.dart_fundamentals import make_reader, quiet_stdout
         dart = make_reader(dart_key)
         corp_code = _corp_code(dart, ticker)
         if not corp_code:
@@ -94,11 +94,12 @@ def _fetch_dart_disclosures(ticker: str, limit: int = 10) -> list[dict]:
 
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=90)
-        df = dart.list(
-            corp_code,
-            bgn_de=start.strftime("%Y%m%d"),
-            end_de=end.strftime("%Y%m%d"),
-        )
+        with quiet_stdout():
+            df = dart.list(
+                corp_code,
+                bgn_de=start.strftime("%Y%m%d"),
+                end_de=end.strftime("%Y%m%d"),
+            )
         if df is None or df.empty:
             return []
 

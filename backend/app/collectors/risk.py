@@ -83,8 +83,10 @@ def get_risk_dart(ticker: str) -> dict:
         return result
     try:
         import OpenDartReader as dart
+        from app.collectors.dart_fundamentals import quiet_stdout
         dr = dart.OpenDartReader(dart_key)
-        corp = dr.find_corp_code(ticker)
+        with quiet_stdout():
+            corp = dr.find_corp_code(ticker)
         if corp is None or corp.empty:
             return result
         corp_code = corp.iloc[0]["corp_code"]
@@ -93,7 +95,8 @@ def get_risk_dart(ticker: str) -> dict:
         # Audit opinion
         for y in [year - 1, year - 2]:
             try:
-                audit = dr.audie(corp_code, y)
+                with quiet_stdout():
+                    audit = dr.audie(corp_code, y)
                 if audit is not None and not audit.empty:
                     opinion = str(audit.iloc[0].get("opinion", ""))
                     if any(w in opinion for w in ["한정", "부적정", "의견거절"]):
@@ -104,7 +107,8 @@ def get_risk_dart(ticker: str) -> dict:
 
         # CB/BW (전환사채/신주인수권부사채) — search disclosures
         try:
-            disc = dr.list(corp_code, kind="B", start="20230101")
+            with quiet_stdout():
+                disc = dr.list(corp_code, kind="B", start="20230101")
             if disc is not None and not disc.empty:
                 titles = " ".join(disc["report_nm"].tolist())
                 if any(w in titles for w in ["전환사채", "신주인수권"]):

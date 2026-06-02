@@ -22,13 +22,24 @@ DataFrame, and the caller simply trains a price-only model.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import logging
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
 from app.collectors import cache
+
+
+@contextlib.contextmanager
+def quiet_stdout():
+    """Swallow library-level print() noise (OpenDartReader echoes every query
+    and DART 'no data' responses to stdout, flooding the logs)."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        yield
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +164,9 @@ def _row_value(fs: pd.DataFrame, metric: str, col: str) -> float | None:
         if v is not None:
             return v
         # 3) loose name contains (last resort)
+        pattern = "|".join(re.escape(c) for c in nm_cands)
         v = _first_value(
-            fs[fs["account_nm"].str.contains("|".join(nm_cands), na=False, regex=True)], col
+            fs[fs["account_nm"].str.contains(pattern, na=False, regex=True)], col
         )
         if v is not None:
             return v
@@ -173,7 +185,8 @@ def _build_history_from_reader(dr, corp_code: str, years: int) -> list[dict]:
     # its report would be public).
     for fy in range(this_year - 1, this_year - 1 - years, -1):
         try:
-            fs = dr.finstate_all(corp_code, fy, reprt_code="11011")
+            with quiet_stdout():
+                fs = dr.finstate_all(corp_code, fy, reprt_code="11011")
         except Exception:
             fs = None
         if fs is None or fs.empty or "account_nm" not in fs.columns:

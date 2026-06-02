@@ -49,9 +49,11 @@ def _get_kr_fundamentals(ticker: str) -> dict:
 
         year = datetime.now(timezone.utc).year
         # Try current year first, fall back to prior year
+        from app.collectors.dart_fundamentals import quiet_stdout
         for y in [year - 1, year - 2]:
             try:
-                fs = dr.finstate_all(corp_code, y, reprt_code="11011")
+                with quiet_stdout():
+                    fs = dr.finstate_all(corp_code, y, reprt_code="11011")
                 if fs is not None and not fs.empty:
                     break
             except Exception:

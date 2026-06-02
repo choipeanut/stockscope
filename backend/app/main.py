@@ -1,4 +1,5 @@
 import logging
+import warnings
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -9,6 +10,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
+# Benign numpy noise: averaging an all-NaN feature window (e.g. a short price
+# slice during dataset build) returns NaN, which is imputed downstream. Silence
+# just this one message so it doesn't drown the logs — without hiding others.
+warnings.filterwarnings("ignore", message="Mean of empty slice", category=RuntimeWarning)
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
