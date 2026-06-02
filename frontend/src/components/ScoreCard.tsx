@@ -106,7 +106,7 @@ function MarketSentimentCard({ detail }: { detail: MarketSentimentDetail }) {
           </div>
         ) : (
           <span style={{ fontSize: 12, color: "#6b7280" }}>
-            {detail.reason?.includes("ANTHROPIC") ? "ANTHROPIC_API_KEY 필요" : "키 필요"}
+            {marketBadge(detail.reason)}
           </span>
         )}
       </div>
@@ -156,9 +156,7 @@ function MarketSentimentCard({ detail }: { detail: MarketSentimentDetail }) {
 
       {!detail.available && (
         <div style={{ fontSize: 12, color: "#6b7280" }}>
-          {detail.reason?.includes("ANTHROPIC")
-            ? "ANTHROPIC_API_KEY(Claude) 설정 시 글로벌 시장 환경이 분석됩니다."
-            : "NEWSAPI_KEY + ANTHROPIC_API_KEY 설정 시 글로벌 시장 환경이 반영됩니다."}
+          {marketHint(detail.reason)}
         </div>
       )}
     </div>
@@ -176,6 +174,24 @@ function sentimentHint(reason?: string): string {
   if (r.includes("no stock-specific") || r.includes("no items"))
     return "이 종목의 최근 뉴스·공시가 없어 감성 분석을 건너뜁니다.";
   return r ? `감성 분석 미사용: ${r}` : "뉴스 감성 분석을 사용할 수 없습니다.";
+}
+
+/** 글로벌 시장 감성 unavailable 사유 → 정확한 안내. */
+function marketHint(reason?: string): string {
+  const r = reason ?? "";
+  if (r.includes("한도") || r.includes("429") || r.toLowerCase().includes("rate"))
+    return "NewsAPI 일일 호출 한도 초과 — 잠시 후 자동 복구됩니다.";
+  if (r.includes("ANTHROPIC"))
+    return "ANTHROPIC_API_KEY(Claude) 설정 시 글로벌 시장 환경이 분석됩니다.";
+  return "NEWSAPI_KEY + ANTHROPIC_API_KEY 설정 시 글로벌 시장 환경이 반영됩니다.";
+}
+
+function marketBadge(reason?: string): string {
+  const r = reason ?? "";
+  if (r.includes("한도") || r.includes("429") || r.toLowerCase().includes("rate"))
+    return "일시 제한";
+  if (r.includes("ANTHROPIC")) return "ANTHROPIC_API_KEY 필요";
+  return "키 필요";
 }
 
 interface Props {

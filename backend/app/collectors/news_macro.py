@@ -5,10 +5,23 @@ NEWSAPI_KEY 환경변수 필요.
 """
 from __future__ import annotations
 
+import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
+logger = logging.getLogger(__name__)
+
 _BASE = "https://newsapi.org/v2/everything"
+
+# NewsAPI 무료 플랜은 하루 100회. analyze마다 호출하면 금방 소진되므로
+# 시장 전반(ticker 무관) 뉴스는 프로세스 전역 캐시로 재사용한다.
+_global_cache: dict = {}              # {"data": [...], "ts": epoch}
+_GLOBAL_TTL_OK = 3600                 # 성공 결과 1시간
+_GLOBAL_TTL_EMPTY = 900              # 빈 결과(할당량/오류)도 15분 캐시 → 재호출 폭주 방지
+
+# 마지막으로 관측된 NewsAPI 오류(예: 429 rateLimited) — unavailable 사유 표면화용
+_last_error: dict = {}               # {"code": int, "message": str}
 
 # 종목별 섹터 키워드 매핑 (없으면 general macro)
 _SECTOR_KEYWORDS: dict[str, str] = {
@@ -29,13 +42,11 @@ _MACRO_QUERY = (
     " stock market S&P NASDAQ"
 )
 
-# 글로벌 시장 전반 분석용 카테고리 쿼리 (ticker 무관)
+# 글로벌 시장 전반 분석용 쿼리 (ticker 무관). NewsAPI 일일 할당량을 아끼려고
+# 폭넓은 2개로 압축 — 감성 판단에는 충분하다.
 _GLOBAL_QUERIES = [
-    "Federal Reserve interest rate monetary policy central bank",
-    "US China trade war tariff geopolitical sanctions",
-    "inflation CPI GDP unemployment recession economy",
-    "stock market VIX volatility investor sentiment rally",
-    "S&P 500 NASDAQ earnings corporate guidance outlook",
+    "Federal Reserve interest rate inflation recession economy monetary policy",
+    "stock market S&P 500 NASDAQ VIX volatility China trade war geopolitical",
 ]
 
 
@@ -58,6 +69,15 @@ def _fetch(query: str, api_key: str, limit: int = 5) -> list[dict]:
             timeout=10,
         )
         if resp.status_code != 200:
+            # 사유 표면화 (특히 429 rateLimited = 일일 할당량 소진)
+            try:
+                body = resp.json()
+                _last_error.update({"code": resp.status_code,
+                                    "message": body.get("message", "")})
+            except Exception:
+                _last_error.update({"code": resp.status_code, "message": ""})
+            logger.warning("NewsAPI %s: %s", resp.status_code,
+                           _last_error.get("message", ""))
             return []
         articles = resp.json().get("articles", [])
         items = []
@@ -118,6 +138,14 @@ def get_global_market_news(limit_per_category: int = 4) -> list[dict]:
     if not api_key:
         return []
 
+    # 캐시 확인 (시장 공통 — 종목 무관). 성공/빈 결과 모두 캐시해 호출 폭주 방지.
+    entry = _global_cache.get("entry")
+    if entry:
+        age = time.time() - entry["ts"]
+        ttl = _GLOBAL_TTL_OK if entry["data"] else _GLOBAL_TTL_EMPTY
+        if age < ttl:
+            return entry["data"]
+
     results: list[dict] = []
     for query in _GLOBAL_QUERIES:
         results.extend(_fetch(query, api_key, limit=limit_per_category))
@@ -129,4 +157,10 @@ def get_global_market_news(limit_per_category: int = 4) -> list[dict]:
             seen.add(item["url"])
             unique.append(item)
 
+    _global_cache["entry"] = {"data": unique, "ts": time.time()}
     return unique
+
+
+def last_newsapi_error() -> dict:
+    """가장 최근 NewsAPI 오류(있으면). unavailable 사유 표면화용."""
+    return dict(_last_error)

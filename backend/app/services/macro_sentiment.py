@@ -85,6 +85,14 @@ def analyze_market_sentiment(news_items: list[dict]) -> dict:
         return _unavailable("ANTHROPIC_API_KEY not set")
 
     if not news_items:
+        # 키는 있는데 뉴스가 비었다면 보통 NewsAPI 일일 한도 초과(429)다 — 구분해서 알림.
+        try:
+            from app.collectors.news_macro import last_newsapi_error
+            err = last_newsapi_error()
+        except Exception:
+            err = {}
+        if err.get("code") == 429:
+            return _unavailable("NewsAPI 일일 호출 한도 초과 (무료 100/day)")
         return _unavailable("no global macro news available")
 
     lines = ["=== 글로벌 거시 환경 뉴스 ===", ""]
