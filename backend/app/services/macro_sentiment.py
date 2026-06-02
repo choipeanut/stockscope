@@ -97,21 +97,8 @@ def analyze_market_sentiment(news_items: list[dict]) -> dict:
     prompt = "\n".join(lines)
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        msg = client.messages.create(
-            model=_MODEL,
-            max_tokens=512,
-            system=_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
-
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        result = json.loads(raw)
+        from app.services.claude_json import call_claude_json
+        result = call_claude_json(api_key, _MODEL, _SYSTEM, prompt, max_tokens=512)
         result["available"] = True
         _set_cache(result)
         return result
