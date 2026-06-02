@@ -181,6 +181,10 @@ function marketHint(reason?: string): string {
   const r = reason ?? "";
   if (r.includes("한도") || r.includes("429") || r.toLowerCase().includes("rate"))
     return "NewsAPI 일일 호출 한도 초과 — 잠시 후 자동 복구됩니다.";
+  if (r.includes("무효") || r.includes("401"))
+    return "NEWSAPI_KEY가 유효하지 않습니다 — 키 값을 다시 확인하세요.";
+  if (r.includes("업그레이드") || r.includes("426"))
+    return "현재 NewsAPI 플랜에서 지원되지 않습니다.";
   if (r.includes("ANTHROPIC"))
     return "ANTHROPIC_API_KEY(Claude) 설정 시 글로벌 시장 환경이 분석됩니다.";
   return "NEWSAPI_KEY + ANTHROPIC_API_KEY 설정 시 글로벌 시장 환경이 반영됩니다.";
@@ -190,6 +194,7 @@ function marketBadge(reason?: string): string {
   const r = reason ?? "";
   if (r.includes("한도") || r.includes("429") || r.toLowerCase().includes("rate"))
     return "일시 제한";
+  if (r.includes("무효") || r.includes("401")) return "키 무효";
   if (r.includes("ANTHROPIC")) return "ANTHROPIC_API_KEY 필요";
   return "키 필요";
 }

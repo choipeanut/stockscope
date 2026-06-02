@@ -91,8 +91,13 @@ def analyze_market_sentiment(news_items: list[dict]) -> dict:
             err = last_newsapi_error()
         except Exception:
             err = {}
-        if err.get("code") == 429:
+        code = err.get("code")
+        if code == 429:
             return _unavailable("NewsAPI 일일 호출 한도 초과 (무료 100/day)")
+        if code == 401:
+            return _unavailable("NEWSAPI_KEY 무효 — 키 값 확인 필요")
+        if code == 426:
+            return _unavailable("NewsAPI 플랜 업그레이드 필요")
         return _unavailable("no global macro news available")
 
     lines = ["=== 글로벌 거시 환경 뉴스 ===", ""]
