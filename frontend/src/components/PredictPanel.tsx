@@ -24,6 +24,10 @@ const FEATURE_LABELS: Record<string, string> = {
   f_roe: "ROE",
   f_op_margin: "영업이익률",
   f_debt_ratio: "부채비율",
+  f_revenue_accel: "매출가속",
+  f_profit_accel: "이익가속",
+  f_earnings_recency: "실적최신성",
+  f_pead_drift: "실적서프라이즈드리프트",
 };
 
 function probColor(p: number): string {

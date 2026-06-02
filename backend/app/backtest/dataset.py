@@ -48,6 +48,15 @@ DART_FEATURE_COLS: list[str] = [
     "f_roe",              # net income / equity %
     "f_op_margin",        # operating income / revenue %
     "f_debt_ratio",       # debt / equity %
+    # ── Earnings-surprise / PEAD signals (point-in-time) ──────────────────────
+    # PEAD = post-earnings-announcement drift: a strong surprise keeps pushing
+    # the price for weeks AFTER the report goes public. These three turn the
+    # already-loaded DART history into the single most robust short-horizon
+    # anomaly, without any new data source.
+    "f_revenue_accel",    # YoY rev growth − prior-year YoY (acceleration)
+    "f_profit_accel",     # YoY op-income growth − prior-year YoY (acceleration)
+    "f_earnings_recency", # drift-window weight: 1.0 just after filing → 0 by ~120d
+    "f_pead_drift",       # headline interaction: surprise magnitude × recency
 ]
 
 
@@ -73,9 +82,9 @@ def _dart_features_at(history: pd.DataFrame | None, as_of) -> dict[str, float] |
         return None
     rec = usable.iloc[-1]  # history is sorted by available_from ascending
 
-    def num(key) -> float | None:
+    def _num(row, key) -> float | None:
         """Cached records turn None into NaN — treat both as missing."""
-        v = rec.get(key)
+        v = row.get(key)
         if v is None:
             return None
         try:
@@ -85,17 +94,55 @@ def _dart_features_at(history: pd.DataFrame | None, as_of) -> dict[str, float] |
         import math
         return None if math.isnan(f) else f
 
+    def num(key) -> float | None:
+        return _num(rec, key)
+
     revenue, op_income = num("revenue"), num("op_income")
     net_income, equity = num("net_income"), num("equity")
     debt = num("debt")
     prev_rev, prev_op = num("prev_revenue"), num("prev_op_income")
 
+    rev_growth = _pct_growth(revenue, prev_rev)
+    profit_growth = _pct_growth(op_income, prev_op)
+
+    # ── PEAD: acceleration vs the prior year's growth (point-in-time) ──────────
+    # The previous usable report (also already public at as_of) gives last year's
+    # YoY, so acceleration uses only past data — no leakage.
+    rev_accel = profit_accel = None
+    if len(usable) >= 2:
+        prev_rec = usable.iloc[-2]
+        prev_rev_growth = _pct_growth(_num(prev_rec, "revenue"), _num(prev_rec, "prev_revenue"))
+        prev_profit_growth = _pct_growth(_num(prev_rec, "op_income"), _num(prev_rec, "prev_op_income"))
+        if rev_growth is not None and prev_rev_growth is not None:
+            rev_accel = rev_growth - prev_rev_growth
+        if profit_growth is not None and prev_profit_growth is not None:
+            profit_accel = profit_growth - prev_profit_growth
+
+    # ── PEAD: recency weight — drift is concentrated right after the filing ────
+    avail_dt = pd.to_datetime(rec.get("available_from"), errors="coerce")
+    recency = None
+    if pd.notna(avail_dt):
+        days_since = (as_of_dt - avail_dt).days
+        # 1.0 on the filing date, linear decay to 0 by ~120 calendar days.
+        recency = max(0.0, 1.0 - max(0, days_since) / 120.0)
+
+    # Headline PEAD interaction: surprise magnitude (op-income YoY, clipped to
+    # damp outliers) modulated by how fresh the report is. 0 when stale or flat.
+    pead_drift = None
+    if profit_growth is not None and recency is not None:
+        clipped = max(-100.0, min(100.0, profit_growth))
+        pead_drift = clipped * recency
+
     feats = {
-        "f_revenue_growth": _pct_growth(revenue, prev_rev),
-        "f_profit_growth": _pct_growth(op_income, prev_op),
+        "f_revenue_growth": rev_growth,
+        "f_profit_growth": profit_growth,
         "f_roe": (net_income / equity * 100.0) if (net_income is not None and equity) else None,
         "f_op_margin": (op_income / revenue * 100.0) if (op_income is not None and revenue) else None,
         "f_debt_ratio": (debt / equity * 100.0) if (debt is not None and equity) else None,
+        "f_revenue_accel": rev_accel,
+        "f_profit_accel": profit_accel,
+        "f_earnings_recency": recency,
+        "f_pead_drift": pead_drift,
     }
     # Return whatever parsed (partial allowed). Missing values stay None and are
     # imputed cross-sectionally upstream; the row is never dropped for them.
