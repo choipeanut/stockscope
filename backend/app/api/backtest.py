@@ -20,6 +20,16 @@ logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 3600  # 1 hour
 
+# AI prediction training-sample density. The forward-return (holding) window is
+# ~21 trading days, but we sample decision dates every _TRAIN_REBALANCE_DAYS to
+# pull MORE rows out of the SAME loaded price frames (no extra per-ticker memory
+# — the universe stays at the OOM-safe 24 KR + 15 US). Denser sampling means
+# overlapping forward windows (samples are autocorrelated) but the walk-forward
+# eval still splits strictly by date, so there is no look-ahead leakage. 10 days
+# roughly doubles samples vs the old 21 (~1900 → ~3800 rows). Used by BOTH the
+# eval and predict paths so they share one cached dataset build.
+_TRAIN_REBALANCE_DAYS = 10
+
 # ---------------------------------------------------------------------------
 # Shared in-memory store: key → {status, payload, started_at}
 # ---------------------------------------------------------------------------
@@ -129,7 +139,11 @@ def _run_predict_eval(key, market_filter, years, rebalance_days, holding_days, n
     try:
         with heavy_slot():  # serialise vs other heavy jobs to bound peak memory
             df = _get_dataset(market_filter, years, rebalance_days, holding_days)
-            report = walk_forward_eval(df, n_splits=n_splits)
+            # When we sample decision dates denser than the forward window, purge
+            # train rows whose forward window overlaps the test block (embargo in
+            # calendar days ≈ holding trading days × 1.5). No overlap → no purge.
+            embargo = int(holding_days * 1.5) if rebalance_days < holding_days else 0
+            report = walk_forward_eval(df, n_splits=n_splits, embargo_days=embargo)
         payload = {
             "market": market_filter or "ALL",
             "n_samples": int(len(df)),
@@ -146,7 +160,7 @@ def _run_predict_eval(key, market_filter, years, rebalance_days, holding_days, n
 def predict_eval(
     market: str = Query(""),
     years: float = Query(5.0, ge=1.0, le=10.0),
-    rebalance_days: int = Query(21, ge=5, le=120),
+    rebalance_days: int = Query(_TRAIN_REBALANCE_DAYS, ge=5, le=120),
     holding_days: int = Query(21, ge=5, le=120),
     n_splits: int = Query(4, ge=1, le=10),
 ) -> dict:
@@ -181,7 +195,7 @@ def _run_predict(key, market_filter, years, holding_days, limit):
     from app.services.heavy import _heavy_lock
     _heavy_lock.acquire()  # serialise vs other heavy jobs to bound peak memory
     try:
-        df = _get_dataset(market_filter, years, 21, holding_days)
+        df = _get_dataset(market_filter, years, _TRAIN_REBALANCE_DAYS, holding_days)
         if df.empty or df["label"].nunique() < 2:
             logger.warning(
                 "[predict] insufficient data: market=%s years=%s holding=%s rows=%d labels=%s",

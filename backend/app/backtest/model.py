@@ -131,12 +131,21 @@ def walk_forward_eval(
     df: pd.DataFrame,
     n_splits: int = 4,
     min_train_frac: float = 0.5,
+    embargo_days: int = 0,
 ) -> WalkForwardReport:
     """Expanding-window walk-forward evaluation by date.
 
     Splits the unique dates into an initial training block (min_train_frac) plus
     n_splits sequential test blocks; trains on everything before each block and
     tests on it, then pools out-of-sample predictions for the metrics.
+
+    embargo_days: when decision dates are sampled more densely than the forward
+    (holding) window — e.g. rebalance 10d but holding 21d — a training sample
+    just before the cutoff has a forward-return window that overlaps into the
+    test block, leaking test-period returns into its label. Purge those by
+    dropping training rows within `embargo_days` CALENDAR days before each
+    cutoff. 0 = no purge (safe only when rebalance >= holding, i.e. windows
+    never overlap).
     """
     if df.empty:
         return WalkForwardReport(0, 0, None, None, None, None, 0)
@@ -150,6 +159,9 @@ def walk_forward_eval(
     split_start = int(n_dates * min_train_frac)
     test_date_blocks = np.array_split(dates[split_start:], max(1, n_splits))
 
+    # Precompute a datetime view once for embargo arithmetic (no-op when off).
+    df_dt = pd.to_datetime(df["date"]) if embargo_days > 0 else None
+
     oos_y: list[np.ndarray] = []
     oos_p: list[np.ndarray] = []
     oos_fwd: list[np.ndarray] = []
@@ -159,7 +171,11 @@ def walk_forward_eval(
         if len(block) == 0:
             continue
         cutoff = block[0]
-        train = df[df["date"] < cutoff]
+        if embargo_days > 0:
+            embargo_cutoff = pd.Timestamp(cutoff) - pd.Timedelta(days=embargo_days)
+            train = df[df_dt < embargo_cutoff]
+        else:
+            train = df[df["date"] < cutoff]
         test = df[df["date"].isin(block)]
         if len(train) < 20 or test.empty:
             continue
