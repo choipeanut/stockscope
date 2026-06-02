@@ -6,7 +6,7 @@ import {
   type PredictionRow,
 } from "../api/client";
 
-type MarketFilter = "" | "KOSDAQ" | "NASDAQ";
+type MarketFilter = "" | "KR" | "KOSPI" | "KOSDAQ" | "NASDAQ";
 
 const FEATURE_LABELS: Record<string, string> = {
   trend_alignment: "추세정렬",
@@ -89,7 +89,9 @@ export function PredictPanel({ onDrillDown }: Props) {
           style={selectStyle}
         >
           <option value="">전체</option>
+          <option value="KR">한국 (코스피+코스닥)</option>
           <option value="NASDAQ">NASDAQ</option>
+          <option value="KOSPI">KOSPI</option>
           <option value="KOSDAQ">KOSDAQ</option>
         </select>
         <select

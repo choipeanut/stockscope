@@ -25,16 +25,17 @@ const queryClient = new QueryClient({
 });
 
 const EXAMPLES = [
-  { ticker: "AAPL", market: "NASDAQ" as const, label: "AAPL · Apple" },
-  { ticker: "MSFT", market: "NASDAQ" as const, label: "MSFT · Microsoft" },
-  { ticker: "005930", market: "KOSDAQ" as const, label: "005930 · 삼성전자" },
+  { ticker: "AAPL",   market: "NASDAQ" as const, label: "AAPL · Apple" },
+  { ticker: "MSFT",   market: "NASDAQ" as const, label: "MSFT · Microsoft" },
+  { ticker: "005930", market: "KOSPI"  as const, label: "005930 · 삼성전자" },
+  { ticker: "000660", market: "KOSPI"  as const, label: "000660 · SK하이닉스" },
   { ticker: "247540", market: "KOSDAQ" as const, label: "247540 · 에코프로비엠" },
 ];
 
-function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ" | "NASDAQ" }) {
+function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSPI" | "KOSDAQ" | "NASDAQ" }) {
   const [ticker, setTicker] = useState(initialTicker);
-  const [market, setMarket] = useState<"KOSDAQ" | "NASDAQ">(initialMarket);
-  const [submitted, setSubmitted] = useState<{ ticker: string; market: string } | null>(
+  const [market, setMarket] = useState<"KOSPI" | "KOSDAQ" | "NASDAQ">(initialMarket);
+  const [submitted, setSubmitted] = useState<{ ticker: string; market: "KOSPI" | "KOSDAQ" | "NASDAQ" } | null>(
     initialTicker ? { ticker: initialTicker, market: initialMarket } : null
   );
 
@@ -82,13 +83,14 @@ function AnalysisView({ initialTicker = "", initialMarket = "NASDAQ" as "KOSDAQ"
           />
           <select
             value={market}
-            onChange={(e) => setMarket(e.target.value as "KOSDAQ" | "NASDAQ")}
+            onChange={(e) => setMarket(e.target.value as "KOSPI" | "KOSDAQ" | "NASDAQ")}
             style={{
               background: "#1f2937", border: "1px solid #374151", borderRadius: 8,
               color: "#f9fafb", padding: "10px 12px", fontSize: 15, outline: "none",
             }}
           >
             <option value="NASDAQ">NASDAQ</option>
+            <option value="KOSPI">KOSPI</option>
             <option value="KOSDAQ">KOSDAQ</option>
           </select>
           <button
@@ -228,11 +230,11 @@ function AppShell() {
   const { user, logout } = useAuth();
   const [tab, setTab] = useState<"analyze" | "screen" | "catalyst" | "predict" | "macro" | "portfolio">("analyze");
   const [drillTicker, setDrillTicker] = useState("");
-  const [drillMarket, setDrillMarket] = useState<"KOSDAQ" | "NASDAQ">("NASDAQ");
+  const [drillMarket, setDrillMarket] = useState<"KOSPI" | "KOSDAQ" | "NASDAQ">("NASDAQ");
 
   function handleDrillDown(ticker: string, market: string) {
     setDrillTicker(ticker);
-    setDrillMarket(market as "KOSDAQ" | "NASDAQ");
+    setDrillMarket(market as "KOSPI" | "KOSDAQ" | "NASDAQ");
     setTab("analyze");
   }
 

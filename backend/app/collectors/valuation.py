@@ -310,7 +310,7 @@ def get_valuation(ticker: str, market: str) -> dict:
     if cached:
         return cached[0]
 
-    data = _get_kr_valuation(ticker) if market == "KOSDAQ" else _get_us_valuation(ticker)
+    data = _get_kr_valuation(ticker) if market in ("KOSDAQ", "KOSPI") else _get_us_valuation(ticker)
     data["as_of"] = datetime.now(timezone.utc).isoformat()
     if data.get("available"):
         cache.set(key, data, _TTL)

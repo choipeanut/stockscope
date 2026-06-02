@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchScreen, type ScreenRow } from "../api/client";
 
 type SortKey = "composite" | "fundamental" | "valuation" | "momentum" | "supply_demand" | "macro" | "risk";
-type MarketFilter = "" | "KOSDAQ" | "NASDAQ";
+type MarketFilter = "" | "KR" | "KOSPI" | "KOSDAQ" | "NASDAQ";
 
 const FACTOR_LABELS: Record<string, string> = {
   fundamental: "펀더멘털",
@@ -129,6 +129,8 @@ export function ScreenTable({ onDrillDown }: Props) {
           }}
         >
           <option value="">전체 시장</option>
+          <option value="KR">한국 (코스피+코스닥)</option>
+          <option value="KOSPI">KOSPI</option>
           <option value="KOSDAQ">KOSDAQ</option>
           <option value="NASDAQ">NASDAQ</option>
         </select>

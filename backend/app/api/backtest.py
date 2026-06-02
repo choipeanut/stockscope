@@ -72,7 +72,7 @@ _register_cache_dropper(_drop_dataset_cache)
 def _get_dataset(market_filter, years, rebalance_days, holding_days):
     from app.backtest.dataset import build_dataset
     # Korea-only request → enrich with point-in-time DART fundamentals.
-    include_dart = market_filter == "KOSDAQ"
+    include_dart = market_filter in ("KOSDAQ", "KOSPI", "KR")
     key = f"ds:{market_filter}:{years}:{rebalance_days}:{holding_days}:dart={include_dart}"
     # Hold the lock for the entire build: concurrent builds double peak memory
     # and OOM a 512 MB box. Background threads don't block HTTP requests, so
@@ -196,7 +196,7 @@ def _run_predict(key, market_filter, years, holding_days, limit):
             return
 
         model = train_logistic(df)
-        include_dart = market_filter == "KOSDAQ"
+        include_dart = market_filter in ("KOSDAQ", "KOSPI", "KR")
         lookback_days = int(years * 365) + 200
         tickers = get_universe(market_filter)
         price_map = _load_prices(tickers, lookback_days)
@@ -207,7 +207,7 @@ def _run_predict(key, market_filter, years, holding_days, limit):
         if include_dart:
             from app.collectors.dart_fundamentals import get_kr_fundamental_history
             for (t, m) in price_map:
-                if m == "KOSDAQ":
+                if m in ("KOSDAQ", "KOSPI"):
                     dart_hist[t] = get_kr_fundamental_history(t, years=int(years) + 1)
 
         today = datetime.now(timezone.utc).date()

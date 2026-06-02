@@ -187,7 +187,8 @@ def debug_score(ticker: str = "AAPL", market: str = "NASDAQ") -> dict:
         steps["ohlcv"] = f"FAIL: {e}"
         return {"ticker": ticker, "market": market, "steps": steps, "composite": None}
 
-    index_ticker = "^IXIC" if market == "NASDAQ" else "^KQ11"
+    _index_map = {"NASDAQ": "^IXIC", "KOSPI": "^KS11", "KOSDAQ": "^KQ11"}
+    index_ticker = _index_map.get(market.upper(), "^KQ11")
     try:
         index_df = get_ohlcv(index_ticker, market, period_days=90)
         steps["index"] = "ok"

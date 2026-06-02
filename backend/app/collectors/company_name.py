@@ -53,7 +53,7 @@ def get_company_name(ticker: str, market: str) -> str:
     if cached and time.time() < cached[1]:
         return cached[0]
 
-    if market == "KOSDAQ":
+    if market in ("KOSDAQ", "KOSPI"):
         # FDR KRX 목록에서 조회
         krx = _load_krx_map()
         name = krx.get(t, "")

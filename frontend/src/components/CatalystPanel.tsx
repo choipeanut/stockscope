@@ -8,7 +8,7 @@ import {
   type PredictionRecord,
 } from "../api/client";
 
-type Market = "KOSDAQ" | "NASDAQ";
+type Market = "KR" | "KOSPI" | "KOSDAQ" | "NASDAQ";
 
 interface Props {
   onDrillDown?: (ticker: string, market: string) => void;
@@ -41,7 +41,7 @@ function pct(v: number | null | undefined): string {
 }
 
 export function CatalystPanel({ onDrillDown }: Props) {
-  const [market, setMarket] = useState<Market>("KOSDAQ");
+  const [market, setMarket] = useState<Market>("KR");
   const [horizon, setHorizon] = useState(21);
   const [triggered, setTriggered] = useState(false);
 
@@ -106,7 +106,9 @@ export function CatalystPanel({ onDrillDown }: Props) {
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
         <select value={market} onChange={(e) => setMarket(e.target.value as Market)}
           style={SELECT}>
-          <option value="KOSDAQ">한국 (KOSPI+KOSDAQ)</option>
+          <option value="KR">한국 (코스피+코스닥)</option>
+          <option value="KOSPI">KOSPI</option>
+          <option value="KOSDAQ">KOSDAQ</option>
           <option value="NASDAQ">NASDAQ</option>
         </select>
         <select value={horizon} onChange={(e) => setHorizon(Number(e.target.value))}

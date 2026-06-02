@@ -163,7 +163,7 @@ def build_dataset(
     if include_dart and dart_history is None:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         from app.collectors.dart_fundamentals import get_kr_fundamental_history
-        kr_tickers = [t for (t, m) in price_map if m == "KOSDAQ"]
+        kr_tickers = [t for (t, m) in price_map if m in ("KOSDAQ", "KOSPI")]
         dart_years = int(years) + 1
         dart_history = {}
         with ThreadPoolExecutor(max_workers=4) as pool:

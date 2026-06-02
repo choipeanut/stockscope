@@ -66,7 +66,7 @@ def refresh_macro() -> dict:
     """Refresh global macro cache for both markets."""
     from app.collectors.macro import get_macro
     results = {}
-    for market in ("NASDAQ", "KOSDAQ"):
+    for market in ("NASDAQ", "KOSPI", "KOSDAQ"):
         try:
             get_macro("", market)
             results[market] = "ok"
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     parser = argparse.ArgumentParser(description="Pre-warm StockScope TTL cache")
-    parser.add_argument("--market", choices=["KOSDAQ", "NASDAQ"], default=None)
+    parser.add_argument("--market", choices=["KOSPI", "KOSDAQ", "NASDAQ"], default=None)
     parser.add_argument("--limit", type=int, default=0, help="Max tickers (0=all)")
     parser.add_argument("--macro-only", action="store_true")
     args = parser.parse_args()

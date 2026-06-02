@@ -35,6 +35,7 @@ from app.services.macro_sentiment import analyze_market_sentiment
 router = APIRouter()
 
 _INDEX_TICKER: dict[str, str] = {
+    "KOSPI":  "^KS11",
     "KOSDAQ": "^KQ11",
     "NASDAQ": "^IXIC",
 }
@@ -68,8 +69,8 @@ def analyze(
     sector: str = Query("", description="Sector hint for macro modulation"),
 ) -> dict:
     market = market.upper()
-    if market not in ("KOSDAQ", "NASDAQ"):
-        raise HTTPException(status_code=400, detail="market must be KOSDAQ or NASDAQ")
+    if market not in ("KOSPI", "KOSDAQ", "NASDAQ"):
+        raise HTTPException(status_code=400, detail="market must be KOSPI, KOSDAQ or NASDAQ")
 
     try:
         df = get_ohlcv(ticker, market, period_days=365)

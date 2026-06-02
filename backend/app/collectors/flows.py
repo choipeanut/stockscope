@@ -118,7 +118,7 @@ def get_flows(ticker: str, market: str) -> dict:
     if cached:
         return cached[0]
 
-    data = _get_kr_flows(ticker) if market == "KOSDAQ" else _get_us_flows(ticker)
+    data = _get_kr_flows(ticker) if market in ("KOSDAQ", "KOSPI") else _get_us_flows(ticker)
     data["as_of"] = datetime.now(timezone.utc).isoformat()
     cache.set(key, data, _TTL)
     return data

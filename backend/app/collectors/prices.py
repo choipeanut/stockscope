@@ -9,10 +9,10 @@ import pandas as pd
 
 from app.collectors import cache
 
-Market = Literal["KOSDAQ", "NASDAQ"]
+Market = Literal["KOSDAQ", "KOSPI", "NASDAQ"]
 
 # TTL per spec: OHLCV US 15 min, KR 5 min intraday
-_TTL = {"KOSDAQ": 5 * 60, "NASDAQ": 15 * 60}
+_TTL = {"KOSDAQ": 5 * 60, "KOSPI": 5 * 60, "NASDAQ": 15 * 60}
 
 _REQUIRED_COLS = ["date", "open", "high", "low", "close", "volume"]
 
@@ -168,7 +168,7 @@ def get_ohlcv(ticker: str, market: Market, period_days: int = 365) -> pd.DataFra
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=period_days + 30)  # buffer for weekends/holidays
 
-    if market == "KOSDAQ":
+    if market in ("KOSDAQ", "KOSPI"):
         raw = _fetch_kr(ticker, start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))
     else:
         raw = _fetch_us(ticker, period_days + 30)

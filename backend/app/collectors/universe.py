@@ -43,17 +43,20 @@ _KOSDAQ_TOP = [
 ]
 
 
-def get_kosdaq_universe() -> list[dict]:
-    """Return Korean market universe (KOSPI + KOSDAQ) as list of {ticker, market, name}."""
-    kospi = [
-        {"ticker": item["ticker"], "market": "KOSDAQ", "name": item["name"]}
+def get_kospi_universe() -> list[dict]:
+    """Return KOSPI universe as list of {ticker, market, name}."""
+    return [
+        {"ticker": item["ticker"], "market": "KOSPI", "name": item["name"]}
         for item in _KOSPI_TOP
     ]
-    kosdaq = [
+
+
+def get_kosdaq_universe() -> list[dict]:
+    """Return KOSDAQ universe as list of {ticker, market, name}."""
+    return [
         {"ticker": item["ticker"], "market": "KOSDAQ", "name": item["name"]}
         for item in _KOSDAQ_TOP
     ]
-    return kospi + kosdaq
 
 
 def get_nasdaq_universe() -> list[dict]:
@@ -73,9 +76,16 @@ def get_nasdaq_universe() -> list[dict]:
 
 
 def get_universe(market: str | None = None) -> list[dict]:
-    """Return full or market-filtered universe."""
+    """Return full or market-filtered universe.
+
+    market="KR" → 한국 전체 (KOSPI + KOSDAQ).
+    """
+    if market == "KOSPI":
+        return get_kospi_universe()
     if market == "KOSDAQ":
         return get_kosdaq_universe()
+    if market == "KR":
+        return get_kospi_universe() + get_kosdaq_universe()
     if market == "NASDAQ":
         return get_nasdaq_universe()
-    return get_kosdaq_universe() + get_nasdaq_universe()
+    return get_kospi_universe() + get_kosdaq_universe() + get_nasdaq_universe()

@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Minimum trading rows needed before momentum is meaningful (MA120 + buffer).
 _MIN_HISTORY_ROWS = 130
 
-_INDEX_TICKER: dict[str, str] = {"KOSDAQ": "^KQ11", "NASDAQ": "^IXIC"}
+_INDEX_TICKER: dict[str, str] = {"KOSPI": "^KS11", "KOSDAQ": "^KQ11", "NASDAQ": "^IXIC"}
 
 
 @dataclass

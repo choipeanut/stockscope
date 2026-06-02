@@ -126,7 +126,7 @@ def get_risk(ticker: str, market: str,
         return cached[0]
 
     price_risk = get_risk_price(price_df, index_df) if price_df is not None else {}
-    dart_risk = get_risk_dart(ticker) if market == "KOSDAQ" else {}
+    dart_risk = get_risk_dart(ticker) if market in ("KOSDAQ", "KOSPI") else {}
 
     data = {**price_risk, **dart_risk, "as_of": datetime.now(timezone.utc).isoformat()}
     cache.set(key, data, _TTL)

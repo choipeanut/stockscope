@@ -207,7 +207,7 @@ def get_fundamentals(ticker: str, market: str) -> dict:
     if cached:
         return cached[0]
 
-    if market == "KOSDAQ":
+    if market in ("KOSDAQ", "KOSPI"):
         # DART API 있으면 사용, 없으면 yfinance .KS 폴백
         dart_key = __import__("os").environ.get("DART_API_KEY")
         if dart_key:

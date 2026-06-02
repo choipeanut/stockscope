@@ -29,7 +29,7 @@ from app.db import repo
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_INDEX_TICKER = {"KOSDAQ": "^KQ11", "NASDAQ": "^IXIC"}
+_INDEX_TICKER = {"KOSPI": "^KS11", "KOSDAQ": "^KQ11", "NASDAQ": "^IXIC"}
 
 # Background run store (mirrors the predict pattern).
 _store: dict[str, dict] = {}
@@ -58,7 +58,7 @@ def _disclosures_and_news(ticker: str, market: str) -> tuple[list[dict], list[di
     disclosures: list[dict] = []
     news: list[dict] = []
     try:
-        if market.upper() == "KOSDAQ":
+        if market.upper() in ("KOSDAQ", "KOSPI"):
             disclosures = _fetch_dart_disclosures(ticker, limit=8)
         news = _fetch_yf_news(ticker, limit=6) if market.upper() == "NASDAQ" else []
     except Exception as e:
@@ -147,7 +147,7 @@ def _build_catalyst_picks(key: str, market_filter: str, horizon_days: int,
         # 2) DART history (KR only) for earnings surprise — shared reader, cheap
         tickers = get_universe(market_filter)
         dart_hist: dict = {}
-        if (market_filter or "").upper() == "KOSDAQ":
+        if (market_filter or "").upper() in ("KOSDAQ", "KOSPI", "KR"):
             from app.collectors.dart_fundamentals import get_kr_fundamental_history
             for it in tickers:
                 dart_hist[it["ticker"]] = get_kr_fundamental_history(
@@ -232,12 +232,12 @@ def _build_catalyst_picks(key: str, market_filter: str, horizon_days: int,
 
 @router.get("/catalyst/run")
 def catalyst_run(
-    market: str = Query("KOSDAQ"),
+    market: str = Query("KR"),
     horizon_days: int = Query(21, ge=5, le=120),
     limit: int = Query(10, ge=1, le=50),
     use_claude: bool = Query(True),
 ) -> dict:
-    market_filter = market.upper() if market else "KOSDAQ"
+    market_filter = market.upper() if market else "KR"
     key = f"catalyst:{market_filter}:{horizon_days}:{limit}"
     e = _store.get(key)
     if e and e["status"] == "ok" and (time.time() - e["ts"]) < _CACHE_TTL:

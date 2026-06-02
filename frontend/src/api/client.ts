@@ -321,7 +321,7 @@ export interface CatalystScoreboard {
 }
 
 export async function fetchCatalystRun(
-  market = "KOSDAQ",
+  market = "KR",
   horizonDays = 21,
   limit = 10,
 ): Promise<CatalystRunResponse> {
