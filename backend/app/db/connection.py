@@ -87,10 +87,35 @@ CREATE TABLE IF NOT EXISTS predictions (
     stock_return  DOUBLE PRECISION,
     bench_return  DOUBLE PRECISION,
     excess_return DOUBLE PRECISION,
-    hit           INTEGER                      -- 1 if excess_return>0 else 0
+    hit           INTEGER,                     -- 1 if excess_return>0 else 0
+    -- reflection loop (사후분석):
+    postmortem    TEXT,                        -- Claude의 '왜 맞았나/틀렸나' 분석
+    reflected_at  TEXT                         -- 사후분석 완료 시점
 );
 CREATE INDEX IF NOT EXISTS idx_pred_due ON predictions(due_at, scored_at);
 CREATE INDEX IF NOT EXISTS idx_pred_strategy ON predictions(strategy, created_at);
+CREATE TABLE IF NOT EXISTS catalyst_watchlist (
+    id        SERIAL PRIMARY KEY,
+    ticker    TEXT NOT NULL,
+    market    TEXT NOT NULL,
+    name      TEXT,
+    added_at  TEXT NOT NULL,
+    active    INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(ticker, market)
+);
+CREATE TABLE IF NOT EXISTS catalyst_lessons (
+    id                  SERIAL PRIMARY KEY,
+    scope               TEXT NOT NULL,          -- 'ticker' | 'global'
+    ticker              TEXT,
+    market              TEXT,
+    catalyst_type       TEXT,
+    lesson              TEXT NOT NULL,
+    source_prediction_id INTEGER,
+    hit                 INTEGER,
+    excess_return       DOUBLE PRECISION,
+    created_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_scope ON catalyst_lessons(scope, ticker, market, created_at);
 """
 
 # SQLite 스키마
@@ -156,8 +181,32 @@ CREATE TABLE IF NOT EXISTS predictions (
     stock_return  REAL,
     bench_return  REAL,
     excess_return REAL,
-    hit           INTEGER
+    hit           INTEGER,
+    postmortem    TEXT,
+    reflected_at  TEXT
 );
+CREATE TABLE IF NOT EXISTS catalyst_watchlist (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker    TEXT NOT NULL,
+    market    TEXT NOT NULL,
+    name      TEXT,
+    added_at  TEXT NOT NULL,
+    active    INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(ticker, market)
+);
+CREATE TABLE IF NOT EXISTS catalyst_lessons (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope                TEXT NOT NULL,
+    ticker               TEXT,
+    market               TEXT,
+    catalyst_type        TEXT,
+    lesson               TEXT NOT NULL,
+    source_prediction_id INTEGER,
+    hit                  INTEGER,
+    excess_return        REAL,
+    created_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_scope ON catalyst_lessons(scope, ticker, market, created_at);
 CREATE INDEX IF NOT EXISTS idx_pred_due ON predictions(due_at, scored_at);
 CREATE INDEX IF NOT EXISTS idx_pred_strategy ON predictions(strategy, created_at);
 """

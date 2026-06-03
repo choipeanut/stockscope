@@ -299,6 +299,7 @@ export interface CatalystPick {
   thesis: string;
   catalyst_type?: string;
   direction?: string;
+  lessons_used?: number;
 }
 
 export interface CatalystRunResponse {
@@ -307,7 +308,10 @@ export interface CatalystRunResponse {
   market?: string;
   horizon_days?: number;
   n_scored_due?: number;
+  n_reflected?: number;
+  n_lessons?: number;
   n_stored?: number;
+  watchlist_empty?: boolean;
   picks?: CatalystPick[];
   as_of?: string | null;
   disclaimer?: string;
@@ -359,6 +363,8 @@ export interface PredictionRecord {
   bench_return: number | null;
   excess_return: number | null;
   hit: number | null;
+  postmortem?: string | null;
+  reflected_at?: string | null;
 }
 
 export async function fetchCatalystHistory(
@@ -368,5 +374,73 @@ export async function fetchCatalystHistory(
   const { data } = await api.get("/catalyst/history", {
     params: { strategy, limit },
   });
+  return data;
+}
+
+// ── Catalyst reflection loop: watchlist + lessons ────────────────────────────
+
+export interface CatalystWatchlistItem {
+  id: number;
+  ticker: string;
+  market: string;
+  name: string | null;
+  added_at: string;
+  active: number;
+}
+
+export interface CatalystLesson {
+  id: number;
+  scope: string; // "ticker" | "global"
+  ticker: string | null;
+  market: string | null;
+  catalyst_type: string | null;
+  lesson: string;
+  source_prediction_id: number | null;
+  hit: number | null;
+  excess_return: number | null;
+  created_at: string;
+}
+
+export async function fetchCatalystLoopRun(
+  horizonDays = 21,
+): Promise<CatalystRunResponse> {
+  const { data } = await api.get<CatalystRunResponse>("/catalyst/loop/run", {
+    params: { horizon_days: horizonDays },
+    timeout: 300_000,
+  });
+  return data;
+}
+
+export async function fetchCatalystWatchlist(): Promise<{
+  watchlist: CatalystWatchlistItem[];
+}> {
+  const { data } = await api.get("/catalyst/watchlist");
+  return data;
+}
+
+export async function addCatalystWatchlist(
+  ticker: string,
+  market: string,
+  name?: string,
+): Promise<{ status: string; item: CatalystWatchlistItem }> {
+  const { data } = await api.post("/catalyst/watchlist/add", null, {
+    params: { ticker, market, name },
+  });
+  return data;
+}
+
+export async function removeCatalystWatchlist(
+  id: number,
+): Promise<{ status: string }> {
+  const { data } = await api.post("/catalyst/watchlist/remove", null, {
+    params: { id },
+  });
+  return data;
+}
+
+export async function fetchCatalystLessons(
+  limit = 50,
+): Promise<{ lessons: CatalystLesson[]; count: number }> {
+  const { data } = await api.get("/catalyst/lessons", { params: { limit } });
   return data;
 }

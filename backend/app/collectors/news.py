@@ -81,7 +81,15 @@ def _corp_code(dart, ticker: str) -> str | None:
     return None
 
 
-def _fetch_dart_disclosures(ticker: str, limit: int = 10) -> list[dict]:
+def _fetch_dart_disclosures(ticker: str, limit: int = 10,
+                            start_date: str | None = None,
+                            end_date: str | None = None) -> list[dict]:
+    """Recent DART disclosures for a ticker.
+
+    `start_date`/`end_date` are ISO date/datetime strings; when given they
+    override the default trailing-90-day window (used by the reflection loop to
+    fetch only what was disclosed during a pick's holding period).
+    """
     dart_key = os.environ.get("DART_API_KEY")
     if not dart_key:
         return []
@@ -92,14 +100,15 @@ def _fetch_dart_disclosures(ticker: str, limit: int = 10) -> list[dict]:
         if not corp_code:
             return []
 
+        def _yyyymmdd(s: str) -> str:
+            return str(s)[:10].replace("-", "")[:8]
+
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=90)
+        bgn_de = _yyyymmdd(start_date) if start_date else start.strftime("%Y%m%d")
+        end_de = _yyyymmdd(end_date) if end_date else end.strftime("%Y%m%d")
         with quiet_stdout():
-            df = dart.list(
-                corp_code,
-                bgn_de=start.strftime("%Y%m%d"),
-                end_de=end.strftime("%Y%m%d"),
-            )
+            df = dart.list(corp_code, bgn_de=bgn_de, end_de=end_de)
         if df is None or df.empty:
             return []
 

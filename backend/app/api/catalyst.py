@@ -120,6 +120,59 @@ def _score_due() -> int:
     return scored
 
 
+# ── reflection: post-mortem scored picks → distilled lessons ─────────────────
+
+def _reflect_scored(limit: int = 50) -> tuple[int, int]:
+    """Post-mortem every scored-but-unreflected pick. Returns (n_reflected, n_lessons)."""
+    from app.services.catalyst import catalyst_postmortem
+    rows = repo.get_scored_unreflected(limit=limit)
+    n_reflected = n_lessons = 0
+    for p in rows:
+        window = _window_disclosures(p)
+        res = catalyst_postmortem(p, window)
+        if not res.get("available"):
+            continue  # no key / transient error → retry on a later run
+        now = datetime.now(timezone.utc).isoformat()
+        repo.record_postmortem(p["id"], res.get("postmortem", ""), now)
+        lesson_rows = []
+        for l in res.get("lessons", []):
+            scope = l.get("scope", "global")
+            lesson_rows.append({
+                "scope": scope,
+                "ticker": p["ticker"] if scope == "ticker" else None,
+                "market": p["market"] if scope == "ticker" else None,
+                "catalyst_type": l.get("catalyst_type"),
+                "lesson": l["lesson"],
+                "source_prediction_id": p["id"],
+                "hit": p.get("hit"),
+                "excess_return": p.get("excess_return"),
+            })
+        n_lessons += repo.insert_lessons(lesson_rows)
+        n_reflected += 1
+    return n_reflected, n_lessons
+
+
+def _window_disclosures(pred: dict) -> list[dict]:
+    """Disclosures published during a pick's holding period (KR only)."""
+    if (pred.get("market") or "").upper() not in ("KOSPI", "KOSDAQ"):
+        return []
+    from app.collectors.news import _fetch_dart_disclosures
+    try:
+        return _fetch_dart_disclosures(
+            pred["ticker"], limit=10,
+            start_date=pred.get("created_at"), end_date=pred.get("scored_at"),
+        )
+    except Exception:
+        return []
+
+
+def _lesson_strings(ticker: str, market: str) -> list[str]:
+    """Flatten ticker-scoped + global lessons into prompt-ready strings."""
+    d = repo.get_lessons(ticker, market)
+    rows = (d.get("ticker") or []) + (d.get("global") or [])
+    return [r["lesson"] for r in rows if r.get("lesson")]
+
+
 # ── generation: build & store catalyst picks ─────────────────────────────────
 
 def _run_catalyst(key: str, market_filter: str, horizon_days: int, limit: int,
@@ -228,6 +281,160 @@ def _build_catalyst_picks(key: str, market_filter: str, horizon_days: int,
             "ts": time.time(),
         }
         logger.info("[catalyst] done: %d picks, %d scored", len(picks), n_scored)
+
+
+# ── reflection loop: score → reflect → predict-with-feedback (watchlist) ─────
+
+def _run_catalyst_loop(key: str, horizon_days: int, use_claude: bool):
+    from app.services.heavy import heavy_slot
+    try:
+        with heavy_slot(drop_caches=True):
+            _build_loop(key, horizon_days, use_claude)
+    except Exception as e:
+        logger.warning("[catalyst-loop] failed: %s", e, exc_info=True)
+        _store[key] = {"status": "error", "payload": {"error": str(e)}, "ts": time.time()}
+
+
+def _build_loop(key: str, horizon_days: int, use_claude: bool):
+    from app.collectors.prices import get_ohlcv
+    from app.collectors.company_name import get_company_name
+    from app.services.catalyst import catalyst_score
+
+    # 1) score due picks, then 2) post-mortem freshly-scored ones into lessons
+    n_scored = _score_due()
+    n_reflected, n_lessons = _reflect_scored()
+
+    watch = repo.get_catalyst_watchlist(active_only=True)
+    if not watch:
+        _store[key] = {
+            "status": "ok",
+            "payload": {
+                "status": "ok", "watchlist_empty": True,
+                "n_scored_due": n_scored, "n_reflected": n_reflected,
+                "n_lessons": n_lessons, "picks": [],
+                "message": "워치리스트가 비어 있습니다. 추적할 종목을 먼저 추가하세요.",
+            },
+            "ts": time.time(),
+        }
+        return
+
+    # 3) DART history (KR) for earnings surprise
+    dart_hist: dict = {}
+    kr = [w for w in watch if (w["market"] or "").upper() in ("KOSPI", "KOSDAQ")]
+    if kr:
+        from app.collectors.dart_fundamentals import get_kr_fundamental_history
+        for w in kr:
+            dart_hist[w["ticker"]] = get_kr_fundamental_history(w["ticker"], years=2)
+
+    # 4) index entry levels per market (benchmark at scoring time)
+    idx_entry: dict[str, float] = {}
+    for m in {w["market"] for w in watch}:
+        try:
+            idf = get_ohlcv(_INDEX_TICKER.get(m, "^IXIC"), m, period_days=400)
+            if idf is not None and not idf.empty:
+                idx_entry[m] = float(idf["close"].iloc[-1])
+        except Exception:
+            pass
+
+    # 5) predict EVERY watchlist name, injecting its accumulated lessons
+    now = datetime.now(timezone.utc)
+    due = now + timedelta(days=horizon_days)
+    rows, picks = [], []
+    for w in watch:
+        t, m = w["ticker"], w["market"]
+        entry = _latest_close(t, m)
+        if entry is None:
+            continue
+        disclosures, news = _disclosures_and_news(t, m)
+        lessons = _lesson_strings(t, m) if use_claude else []
+        cs = catalyst_score(t, m, dart_history=dart_hist.get(t),
+                            disclosures=disclosures, news=news,
+                            use_claude=use_claude, lessons=lessons)
+        name = w.get("name") or get_company_name(t, m)
+        rows.append({
+            "strategy": "catalyst", "ticker": t, "market": m, "name": name,
+            "created_at": now.isoformat(), "horizon_days": horizon_days,
+            "due_at": due.isoformat(), "score": cs["score"], "rank": None,
+            "thesis": cs["thesis"], "entry_price": entry,
+            "features": json.dumps({
+                "index_entry": idx_entry.get(m),
+                "surprise": cs["surprise"], "catalyst": cs["catalyst"],
+                "lessons_used": lessons,
+            }, ensure_ascii=False),
+        })
+        picks.append({
+            "ticker": t, "market": m, "name": name, "score": cs["score"],
+            "thesis": cs["thesis"], "catalyst_type": cs["catalyst"].get("catalyst_type"),
+            "direction": cs["catalyst"].get("direction"),
+            "lessons_used": len(lessons),
+        })
+
+    picks.sort(key=lambda r: r["score"], reverse=True)
+    n_stored = repo.insert_predictions(rows)
+
+    _store[key] = {
+        "status": "ok",
+        "payload": {
+            "status": "ok", "horizon_days": horizon_days,
+            "n_scored_due": n_scored, "n_reflected": n_reflected,
+            "n_lessons": n_lessons, "n_stored": n_stored,
+            "picks": [{"rank": i + 1, **p} for i, p in enumerate(picks)],
+            "as_of": now.isoformat(),
+            "disclaimer": (
+                "촉매 점수는 공시·실적 기반 가설이며 투자 권유가 아닙니다. "
+                "매 사이클 만기 픽을 채점하고 사후분석한 교훈을 다음 예측에 반영합니다."
+            ),
+        },
+        "ts": time.time(),
+    }
+    logger.info("[catalyst-loop] %d picks, %d scored, %d reflected, %d lessons",
+                n_stored, n_scored, n_reflected, n_lessons)
+
+
+@router.get("/catalyst/loop/run")
+def catalyst_loop_run(
+    horizon_days: int = Query(21, ge=5, le=120),
+    use_claude: bool = Query(True),
+) -> dict:
+    key = f"catalyst-loop:{horizon_days}"
+    e = _store.get(key)
+    if e and e["status"] == "ok" and (time.time() - e["ts"]) < _CACHE_TTL:
+        return {**e["payload"], "cached": True}
+    if _is_running(key):
+        return {"status": "running", "message": "촉매 루프 실행 중…"}
+    _store[key] = {"status": "running", "payload": {}, "ts": time.time()}
+    threading.Thread(
+        target=_run_catalyst_loop, args=(key, horizon_days, use_claude),
+        daemon=True, name="catalyst-loop-bg",
+    ).start()
+    return {"status": "running", "message": "촉매 루프 시작됨 — 채점·사후분석·재예측. 자동 폴링."}
+
+
+@router.get("/catalyst/watchlist")
+def catalyst_watchlist_list() -> dict:
+    return {"watchlist": repo.get_catalyst_watchlist(active_only=True)}
+
+
+@router.post("/catalyst/watchlist/add")
+def catalyst_watchlist_add(
+    ticker: str = Query(...),
+    market: str = Query(...),
+    name: str | None = Query(None),
+) -> dict:
+    row = repo.add_catalyst_watchlist(ticker.strip(), market.strip().upper(), name)
+    return {"status": "ok", "item": row}
+
+
+@router.post("/catalyst/watchlist/remove")
+def catalyst_watchlist_remove(id: int = Query(...)) -> dict:
+    repo.remove_catalyst_watchlist(id)
+    return {"status": "ok"}
+
+
+@router.get("/catalyst/lessons")
+def catalyst_lessons(limit: int = Query(50, ge=1, le=200)) -> dict:
+    rows = repo.get_all_lessons(limit=limit)
+    return {"lessons": rows, "count": len(rows)}
 
 
 @router.get("/catalyst/run")

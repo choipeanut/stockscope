@@ -65,8 +65,9 @@ app.include_router(catalyst_router)
 def _startup() -> None:
     """서버 시작 시 DB 마이그레이션 실행."""
     try:
-        from app.db.repo import migrate_add_realized_pnl
+        from app.db.repo import migrate_add_realized_pnl, migrate_catalyst_loop
         migrate_add_realized_pnl()
+        migrate_catalyst_loop()
         logging.getLogger(__name__).info("DB migration OK")
     except Exception as e:
         logging.getLogger(__name__).warning("DB migration warning: %s", e)

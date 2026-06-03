@@ -148,6 +148,35 @@ def migrate_add_realized_pnl() -> None:
         con.close()
 
 
+def migrate_catalyst_loop() -> None:
+    """Add reflection-loop columns to an existing predictions table.
+
+    New tables (catalyst_watchlist, catalyst_lessons) are created by the
+    `CREATE TABLE IF NOT EXISTS` schema on every connection, so only the new
+    columns on the pre-existing predictions table need an explicit ALTER.
+    """
+    from app.db.connection import is_postgres
+    new_cols = (("postmortem", "TEXT"), ("reflected_at", "TEXT"))
+    if is_postgres():
+        # ensure tables exist, then add columns idempotently
+        with get_conn() as con:
+            for col, typ in new_cols:
+                execute(con, f"ALTER TABLE predictions ADD COLUMN IF NOT EXISTS {col} {typ}")
+        return
+    import sqlite3
+    from app.db.connection import _SQLITE_PATH, SQLITE_SCHEMA
+    con = sqlite3.connect(str(_SQLITE_PATH))
+    try:
+        con.executescript(SQLITE_SCHEMA)
+        cols = [r[1] for r in con.execute("PRAGMA table_info(predictions)").fetchall()]
+        for col, typ in new_cols:
+            if col not in cols:
+                con.execute(f"ALTER TABLE predictions ADD COLUMN {col} {typ}")
+        con.commit()
+    finally:
+        con.close()
+
+
 # ── Watchlist ──────────────────────────────────────────────────────────────
 
 def add_watchlist(user_id: int, ticker: str, market: str) -> dict:
@@ -254,3 +283,93 @@ def scoreboard(strategy: str | None = None) -> dict:
         "avg_stock": _avg("stock_return"),
         "avg_bench": _avg("bench_return"),
     }
+
+
+# ── Catalyst reflection loop: watchlist + lessons + post-mortem ───────────────
+
+def get_catalyst_watchlist(active_only: bool = True) -> list[dict]:
+    with get_conn() as con:
+        if active_only:
+            return fetchall(con,
+                "SELECT * FROM catalyst_watchlist WHERE active=1 ORDER BY added_at",
+                ())
+        return fetchall(con, "SELECT * FROM catalyst_watchlist ORDER BY added_at", ())
+
+
+def add_catalyst_watchlist(ticker: str, market: str, name: str | None = None) -> dict:
+    ts = datetime.now(timezone.utc).isoformat()
+    with get_conn() as con:
+        execute(con,
+            """INSERT INTO catalyst_watchlist (ticker, market, name, added_at, active)
+               VALUES (?,?,?,?,1)
+               ON CONFLICT(ticker, market)
+               DO UPDATE SET active=1, name=COALESCE(EXCLUDED.name, catalyst_watchlist.name)""",
+            (ticker, market, name, ts))
+        return fetchone(con,
+            "SELECT * FROM catalyst_watchlist WHERE ticker=? AND market=?", (ticker, market))
+
+
+def remove_catalyst_watchlist(wid: int) -> None:
+    with get_conn() as con:
+        execute(con, "DELETE FROM catalyst_watchlist WHERE id=?", (wid,))
+
+
+def insert_lessons(rows: list[dict]) -> int:
+    """Persist distilled lessons from post-mortems. Returns count inserted."""
+    if not rows:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as con:
+        for r in rows:
+            execute(con,
+                """INSERT INTO catalyst_lessons
+                   (scope, ticker, market, catalyst_type, lesson,
+                    source_prediction_id, hit, excess_return, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (r.get("scope", "global"), r.get("ticker"), r.get("market"),
+                 r.get("catalyst_type"), r["lesson"], r.get("source_prediction_id"),
+                 r.get("hit"), r.get("excess_return"), r.get("created_at") or now))
+    return len(rows)
+
+
+def get_lessons(ticker: str | None = None, market: str | None = None,
+                limit_ticker: int = 5, limit_global: int = 5) -> dict:
+    """Lessons relevant to a prediction: this ticker's + recent global ones.
+
+    Returns {"ticker": [...], "global": [...]}. Newest first.
+    """
+    with get_conn() as con:
+        tlessons: list[dict] = []
+        if ticker and market:
+            tlessons = fetchall(con,
+                """SELECT * FROM catalyst_lessons
+                   WHERE scope='ticker' AND ticker=? AND market=?
+                   ORDER BY created_at DESC LIMIT ?""",
+                (ticker, market, limit_ticker))
+        glessons = fetchall(con,
+            "SELECT * FROM catalyst_lessons WHERE scope='global' ORDER BY created_at DESC LIMIT ?",
+            (limit_global,))
+    return {"ticker": tlessons, "global": glessons}
+
+
+def get_all_lessons(limit: int = 50) -> list[dict]:
+    with get_conn() as con:
+        return fetchall(con,
+            "SELECT * FROM catalyst_lessons ORDER BY created_at DESC LIMIT ?", (limit,))
+
+
+def get_scored_unreflected(limit: int = 100) -> list[dict]:
+    """Predictions that have been scored but not yet post-mortem'd."""
+    with get_conn() as con:
+        return fetchall(con,
+            """SELECT * FROM predictions
+               WHERE scored_at IS NOT NULL AND reflected_at IS NULL
+               ORDER BY scored_at LIMIT ?""",
+            (limit,))
+
+
+def record_postmortem(pred_id: int, postmortem: str, reflected_at: str) -> None:
+    with get_conn() as con:
+        execute(con,
+            "UPDATE predictions SET postmortem=?, reflected_at=? WHERE id=?",
+            (postmortem, reflected_at, pred_id))
