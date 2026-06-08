@@ -60,6 +60,46 @@ def _fetch_yf_news(ticker: str, limit: int = 10) -> list[dict]:
         return []
 
 
+# ── KR: Google News RSS (키 불필요, 회사명 검색) ──────────────────────────────
+
+def _fetch_google_news_kr(query: str, limit: int = 6) -> list[dict]:
+    """최근 한국어 뉴스 헤드라인 (Google News RSS, 키 불필요).
+
+    DART 공시만으로는 점수가 잘 안 움직여서, KR 종목에도 언론 뉴스를 촉매
+    입력으로 넣기 위한 소스. 회사명으로 검색한다. 실패 시 빈 리스트(graceful).
+    """
+    if not query:
+        return []
+    try:
+        import requests
+        import xml.etree.ElementTree as ET
+        from urllib.parse import quote
+        url = (
+            "https://news.google.com/rss/search?q="
+            f"{quote(query)}&hl=ko&gl=KR&ceid=KR:ko"
+        )
+        r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200 or not r.content:
+            return []
+        root = ET.fromstring(r.content)
+        items: list[dict] = []
+        for item in list(root.iterfind(".//item"))[:limit]:
+            title = (item.findtext("title") or "").strip()
+            if not title:
+                continue
+            items.append({
+                "title": title,
+                "url": (item.findtext("link") or "").strip(),
+                "source": "GoogleNews",
+                "published": (item.findtext("pubDate") or "").strip(),
+                "summary": "",
+                "type": "news",
+            })
+        return items
+    except Exception:
+        return []
+
+
 # ── KOSDAQ: DART 공시 ─────────────────────────────────────────────────────────
 
 def _corp_code(dart, ticker: str) -> str | None:

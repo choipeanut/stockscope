@@ -403,9 +403,10 @@ export interface CatalystLesson {
 
 export async function fetchCatalystLoopRun(
   horizonDays = 21,
+  force = false,
 ): Promise<CatalystRunResponse> {
   const { data } = await api.get<CatalystRunResponse>("/catalyst/loop/run", {
-    params: { horizon_days: horizonDays },
+    params: { horizon_days: horizonDays, force },
     timeout: 300_000,
   });
   return data;

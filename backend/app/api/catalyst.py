@@ -53,14 +53,24 @@ def _latest_close(ticker: str, market: str) -> float | None:
 
 
 def _disclosures_and_news(ticker: str, market: str) -> tuple[list[dict], list[dict]]:
-    """Fresh disclosures (KR) + news titles, without the sentiment Claude call."""
-    from app.collectors.news import _fetch_dart_disclosures, _fetch_yf_news
+    """Fresh disclosures (KR) + news titles, without the sentiment Claude call.
+
+    KR: DART 공시 + Google News(회사명 검색) — 공시만으로는 점수가 잘 안 움직여서
+    언론 뉴스도 촉매 입력에 포함한다. NASDAQ: yfinance 뉴스.
+    """
+    from app.collectors.news import (
+        _fetch_dart_disclosures, _fetch_yf_news, _fetch_google_news_kr,
+    )
     disclosures: list[dict] = []
     news: list[dict] = []
     try:
         if market.upper() in ("KOSDAQ", "KOSPI"):
             disclosures = _fetch_dart_disclosures(ticker, limit=8)
-        news = _fetch_yf_news(ticker, limit=6) if market.upper() == "NASDAQ" else []
+            from app.collectors.company_name import get_company_name
+            name = get_company_name(ticker, market)
+            news = _fetch_google_news_kr(name, limit=6) if name else []
+        elif market.upper() == "NASDAQ":
+            news = _fetch_yf_news(ticker, limit=6)
     except Exception as e:
         logger.debug("catalyst inputs failed %s: %s", ticker, e)
     return disclosures, news
@@ -395,13 +405,17 @@ def _build_loop(key: str, horizon_days: int, use_claude: bool):
 def catalyst_loop_run(
     horizon_days: int = Query(21, ge=5, le=120),
     use_claude: bool = Query(True),
+    force: bool = Query(False),
 ) -> dict:
     key = f"catalyst-loop:{horizon_days}"
     e = _store.get(key)
-    if e and e["status"] == "ok" and (time.time() - e["ts"]) < _CACHE_TTL:
-        return {**e["payload"], "cached": True}
+    # 실행 중이면 항상 진행상태만 반환(중복 스폰 방지). force는 폴링이 아닌
+    # 최초 클릭에서만 client가 보내므로, 완료된 결과에 대한 폴링은 force=False라
+    # 캐시를 그대로 받는다 → 재실행 루프 없음.
     if _is_running(key):
         return {"status": "running", "message": "촉매 루프 실행 중…"}
+    if (not force) and e and e["status"] == "ok" and (time.time() - e["ts"]) < _CACHE_TTL:
+        return {**e["payload"], "cached": True}
     _store[key] = {"status": "running", "payload": {}, "ts": time.time()}
     threading.Thread(
         target=_run_catalyst_loop, args=(key, horizon_days, use_claude),

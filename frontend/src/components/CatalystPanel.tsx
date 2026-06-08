@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchCatalystLoopRun,
@@ -48,6 +48,8 @@ export function CatalystPanel({ onDrillDown }: Props) {
   const qc = useQueryClient();
   const [horizon, setHorizon] = useState(21);
   const [triggered, setTriggered] = useState(false);
+  const [runNonce, setRunNonce] = useState(0);
+  const forceOnceRef = useRef(false);
   const [newTicker, setNewTicker] = useState("");
   const [newMarket, setNewMarket] = useState<Market>("KOSPI");
   const [adding, setAdding] = useState(false);
@@ -59,8 +61,14 @@ export function CatalystPanel({ onDrillDown }: Props) {
   });
 
   const run = useQuery({
-    queryKey: ["catalyst-loop", horizon],
-    queryFn: () => fetchCatalystLoopRun(horizon),
+    queryKey: ["catalyst-loop", horizon, runNonce],
+    queryFn: () => {
+      // force는 클릭 직후 첫 호출에서만 캐시를 버스트한다. 이후 폴링 호출은
+      // force=false라 서버 캐시(완료 결과)를 그대로 받아 재실행 루프가 없다.
+      const f = forceOnceRef.current;
+      forceOnceRef.current = false;
+      return fetchCatalystLoopRun(horizon, f);
+    },
     enabled: triggered,
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -218,7 +226,8 @@ export function CatalystPanel({ onDrillDown }: Props) {
           <option value={21}>1개월 (21일)</option>
           <option value={63}>3개월 (63일)</option>
         </select>
-        <button onClick={() => setTriggered(true)} disabled={running || items.length === 0}
+        <button onClick={() => { forceOnceRef.current = true; setTriggered(true); setRunNonce((n) => n + 1); }}
+          disabled={running || items.length === 0}
           style={{
             ...BTN, opacity: running || items.length === 0 ? 0.6 : 1,
             cursor: running || items.length === 0 ? "default" : "pointer",
