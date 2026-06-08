@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchCatalystLoopRun,
@@ -88,9 +88,26 @@ export function CatalystPanel({ onDrillDown }: Props) {
   const items = watchlist.data?.watchlist ?? [];
   const picks: CatalystPick[] =
     run.data?.status === "ok" ? run.data.picks ?? [] : [];
-  const scored: PredictionRecord[] = (history.data?.predictions ?? []).filter(
-    (p) => p.scored_at,
-  );
+  const allPreds = history.data?.predictions ?? [];
+  const pending: PredictionRecord[] = allPreds
+    .filter((p) => !p.scored_at)
+    .sort((a, b) => (a.due_at < b.due_at ? -1 : 1));
+  const scored: PredictionRecord[] = allPreds.filter((p) => p.scored_at);
+
+  // 루프가 끝나면 DB 기반 목록(추적중/과거픽/성과/교훈)을 새로고침
+  useEffect(() => {
+    if (run.data?.status === "ok") {
+      qc.invalidateQueries({ queryKey: ["catalyst-history"] });
+      qc.invalidateQueries({ queryKey: ["catalyst-scoreboard"] });
+      qc.invalidateQueries({ queryKey: ["catalyst-lessons"] });
+    }
+  }, [run.data?.status, run.data?.as_of, qc]);
+
+  function dday(dueAt: string): string {
+    const ms = new Date(dueAt).getTime() - Date.now();
+    const d = Math.ceil(ms / 86_400_000);
+    return d > 0 ? `D-${d}` : d === 0 ? "D-day" : `만기 +${-d}일 (채점 대기)`;
+  }
 
   async function handleAdd() {
     const t = newTicker.trim();
@@ -197,6 +214,7 @@ export function CatalystPanel({ onDrillDown }: Props) {
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
         <select value={horizon} onChange={(e) => setHorizon(Number(e.target.value))}
           style={SELECT}>
+          <option value={7}>1주일 (7일)</option>
           <option value={21}>1개월 (21일)</option>
           <option value={63}>3개월 (63일)</option>
         </select>
@@ -254,6 +272,47 @@ export function CatalystPanel({ onDrillDown }: Props) {
                     {p.lessons_used ? `${p.lessons_used}개` : "—"}
                   </td>
                   <td style={{ ...TD, color: "#d1d5db" }}>{p.thesis}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 추적 중 (만기 대기) — DB 기반이라 새로고침/재배포에도 유지 */}
+      {pending.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, margin: "8px 0" }}>
+            ⏳ 추적 중 — 만기 대기 ({pending.length}건)
+          </h3>
+          <p style={{ color: "#6b7280", fontSize: 12, margin: "0 0 8px" }}>
+            박제된 예측은 만기일까지 보존됩니다. 만기 이후 <b>루프를 다시 실행</b>하면 채점돼요.
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ color: "#9ca3af", textAlign: "left" }}>
+                <th style={TH}>박제일</th><th style={TH}>종목</th><th style={TH}>점수</th>
+                <th style={TH}>만기일</th><th style={TH}>남은기간</th>
+                <th style={TH}>근거 (사전 등록)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pending.map((p) => (
+                <tr key={p.id}
+                  onClick={() => onDrillDown?.(p.ticker, p.market)}
+                  style={{ borderTop: "1px solid #1f2937", cursor: "pointer" }}>
+                  <td style={{ ...TD, color: "#6b7280" }}>{p.created_at.slice(0, 10)}</td>
+                  <td style={TD}>
+                    <b>{p.name || p.ticker}</b>
+                    <span style={{ color: "#6b7280", marginLeft: 6, fontSize: 11 }}>{p.ticker}</span>
+                  </td>
+                  <td style={{ ...TD, fontWeight: 700 }}>{p.score?.toFixed(0) ?? "—"}</td>
+                  <td style={{ ...TD, color: "#9ca3af" }}>{p.due_at.slice(0, 10)}</td>
+                  <td style={{
+                    ...TD,
+                    color: new Date(p.due_at).getTime() <= Date.now() ? "#f59e0b" : "#9ca3af",
+                  }}>{dday(p.due_at)}</td>
+                  <td style={{ ...TD, color: "#d1d5db", maxWidth: 320 }}>{p.thesis}</td>
                 </tr>
               ))}
             </tbody>
