@@ -244,6 +244,11 @@ export function CatalystPanel({ onDrillDown }: Props) {
       {run.error && (
         <p style={{ color: "#ef4444", fontSize: 13 }}>{(run.error as Error).message}</p>
       )}
+      {run.data?.status === "error" && (
+        <p style={{ color: "#ef4444", fontSize: 13 }}>
+          {run.data.message ?? "촉매 루프 실행 중 오류가 발생했습니다. 다시 실행해 주세요."}
+        </p>
+      )}
 
       {/* 이번 사이클 픽 */}
       {picks.length > 0 && (

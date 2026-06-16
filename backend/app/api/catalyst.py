@@ -103,6 +103,7 @@ def _score_due() -> int:
         return float(sl["close"].iloc[-1]) if not sl.empty else None
 
     for p in due:
+      try:
         try:
             feats = json.loads(p.get("features") or "{}")
         except (TypeError, ValueError):
@@ -127,6 +128,9 @@ def _score_due() -> int:
             exit_px, stock_ret, bench_ret, excess, hit,
         )
         scored += 1
+      except Exception as e:
+        logger.warning("[catalyst] score failed for %s: %s", p.get("id"), e)
+        continue
     return scored
 
 
@@ -138,27 +142,31 @@ def _reflect_scored(limit: int = 50) -> tuple[int, int]:
     rows = repo.get_scored_unreflected(limit=limit)
     n_reflected = n_lessons = 0
     for p in rows:
-        window = _window_disclosures(p)
-        res = catalyst_postmortem(p, window)
-        if not res.get("available"):
-            continue  # no key / transient error → retry on a later run
-        now = datetime.now(timezone.utc).isoformat()
-        repo.record_postmortem(p["id"], res.get("postmortem", ""), now)
-        lesson_rows = []
-        for l in res.get("lessons", []):
-            scope = l.get("scope", "global")
-            lesson_rows.append({
-                "scope": scope,
-                "ticker": p["ticker"] if scope == "ticker" else None,
-                "market": p["market"] if scope == "ticker" else None,
-                "catalyst_type": l.get("catalyst_type"),
-                "lesson": l["lesson"],
-                "source_prediction_id": p["id"],
-                "hit": p.get("hit"),
-                "excess_return": p.get("excess_return"),
-            })
-        n_lessons += repo.insert_lessons(lesson_rows)
-        n_reflected += 1
+        try:
+            window = _window_disclosures(p)
+            res = catalyst_postmortem(p, window)
+            if not res.get("available"):
+                continue  # no key / transient error → retry on a later run
+            now = datetime.now(timezone.utc).isoformat()
+            repo.record_postmortem(p["id"], res.get("postmortem", ""), now)
+            lesson_rows = []
+            for l in res.get("lessons", []):
+                scope = l.get("scope", "global")
+                lesson_rows.append({
+                    "scope": scope,
+                    "ticker": p["ticker"] if scope == "ticker" else None,
+                    "market": p["market"] if scope == "ticker" else None,
+                    "catalyst_type": l.get("catalyst_type"),
+                    "lesson": l.get("lesson", ""),
+                    "source_prediction_id": p["id"],
+                    "hit": p.get("hit"),
+                    "excess_return": p.get("excess_return"),
+                })
+            n_lessons += repo.insert_lessons([r for r in lesson_rows if r["lesson"]])
+            n_reflected += 1
+        except Exception as e:
+            logger.warning("[catalyst] reflect failed for %s: %s", p.get("id"), e)
+            continue
     return n_reflected, n_lessons
 
 
@@ -310,9 +318,18 @@ def _build_loop(key: str, horizon_days: int, use_claude: bool):
     from app.collectors.company_name import get_company_name
     from app.services.catalyst import catalyst_score
 
-    # 1) score due picks, then 2) post-mortem freshly-scored ones into lessons
-    n_scored = _score_due()
-    n_reflected, n_lessons = _reflect_scored()
+    # 1) score due picks, then 2) post-mortem freshly-scored ones into lessons.
+    # Both are best-effort: a failure here must not abort the fresh prediction step.
+    try:
+        n_scored = _score_due()
+    except Exception as e:
+        logger.warning("[catalyst-loop] scoring step failed: %s", e)
+        n_scored = 0
+    try:
+        n_reflected, n_lessons = _reflect_scored()
+    except Exception as e:
+        logger.warning("[catalyst-loop] reflection step failed: %s", e)
+        n_reflected, n_lessons = 0, 0
 
     watch = repo.get_catalyst_watchlist(active_only=True)
     if not watch:
@@ -409,13 +426,23 @@ def catalyst_loop_run(
 ) -> dict:
     key = f"catalyst-loop:{horizon_days}"
     e = _store.get(key)
-    # 실행 중이면 항상 진행상태만 반환(중복 스폰 방지). force는 폴링이 아닌
-    # 최초 클릭에서만 client가 보내므로, 완료된 결과에 대한 폴링은 force=False라
-    # 캐시를 그대로 받는다 → 재실행 루프 없음.
+    # 이미 실행 중이면 진행상태만 반환(중복 스폰 방지).
     if _is_running(key):
         return {"status": "running", "message": "촉매 루프 실행 중…"}
-    if (not force) and e and e["status"] == "ok" and (time.time() - e["ts"]) < _CACHE_TTL:
-        return {**e["payload"], "cached": True}
+    # 새 실행은 오직 force(버튼 클릭)에서만 시작한다. 폴링(force=False)은 상태만
+    # 읽고 절대 새 작업을 시작하지 않는다 → 에러/프로세스 재시작 시 무한 재시작 방지.
+    if not force:
+        if e and e["status"] == "ok" and (time.time() - e["ts"]) < _CACHE_TTL:
+            return {**e["payload"], "cached": True}
+        if e and e["status"] == "error":
+            return {
+                "status": "error",
+                "message": "촉매 루프 실행 중 오류가 발생했습니다. 다시 실행해 주세요.",
+                **(e.get("payload") or {}),
+            }
+        # 진행 중이던 게 없음(첫 진입/재배포 후) → 유휴 상태 보고, 작업 시작 안 함
+        return {"status": "idle"}
+    # force=True: 캐시 무시하고 새로 시작
     _store[key] = {"status": "running", "payload": {}, "ts": time.time()}
     threading.Thread(
         target=_run_catalyst_loop, args=(key, horizon_days, use_claude),
