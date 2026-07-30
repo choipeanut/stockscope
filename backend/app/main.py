@@ -151,6 +151,42 @@ def debug_newsapi() -> dict:
     return out
 
 
+@app.get("/debug/auth")
+def debug_auth() -> dict:
+    """로그인 관련 서버 설정 점검 (비밀값은 노출하지 않음).
+
+    로그인이 안 될 때 가장 먼저 여기를 열어본다. google_client_id_set이
+    false면 Render 대시보드에 GOOGLE_CLIENT_ID가 없는 것이고, 그게 원인이다.
+    """
+    import os
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    jwt_secret = os.environ.get("JWT_SECRET", "")
+    problems = []
+    if not client_id:
+        problems.append(
+            "GOOGLE_CLIENT_ID 미설정 — /auth/google 이 500을 반환합니다. "
+            "Render 대시보드 → Environment 에 추가하세요."
+        )
+    elif not client_id.endswith(".apps.googleusercontent.com"):
+        problems.append(
+            "GOOGLE_CLIENT_ID 형식이 이상합니다 — "
+            "'....apps.googleusercontent.com' 이어야 합니다."
+        )
+    if not jwt_secret:
+        problems.append(
+            "JWT_SECRET 미설정 — dev 기본값이 사용되어 토큰 위조가 가능합니다."
+        )
+    return {
+        "google_client_id_set": bool(client_id),
+        # 어떤 클라이언트인지 식별만 가능한 만큼만
+        "google_client_id_suffix": client_id[-30:] if client_id else None,
+        "jwt_secret_set": bool(jwt_secret),
+        "allowed_origins": _ALLOWED_ORIGINS,
+        "problems": problems,
+        "ok": not problems,
+    }
+
+
 @app.get("/debug/db")
 def debug_db() -> dict:
     """DB 연결 상태 확인 (인증 불필요)."""

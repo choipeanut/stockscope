@@ -3,6 +3,8 @@ import { GoogleLogin } from "@react-oauth/google";
 import { useAuth } from "../contexts/AuthContext";
 import { warmUpBackend } from "../api/client";
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
+
 export function LoginPage() {
   const { login } = useAuth();
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +106,25 @@ export function LoginPage() {
             marginBottom: 16,
           }}
         >
-          {loading ? (
+          {!GOOGLE_CLIENT_ID ? (
+            <div
+              style={{
+                padding: "12px 14px",
+                background: "#2d0c0c",
+                border: "1px solid #7f1d1d",
+                borderRadius: 8,
+                color: "#fca5a5",
+                fontSize: 12,
+                lineHeight: 1.6,
+                textAlign: "left",
+              }}
+            >
+              <strong>설정 오류:</strong> 빌드에 <code>VITE_GOOGLE_CLIENT_ID</code>가
+              없어 Google 로그인을 초기화할 수 없습니다.
+              <br />
+              Vercel → Settings → Environment Variables 에 값을 추가한 뒤 재배포하세요.
+            </div>
+          ) : loading ? (
             <div
               style={{
                 padding: "10px 24px",
