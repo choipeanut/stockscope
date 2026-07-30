@@ -7,6 +7,12 @@ services:
     buildCommand: pip install -r requirements.txt && pip install -e . --no-deps
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      # ── 로그인에 반드시 필요 (없으면 /auth/google 이 500) ──────────────
+      - key: GOOGLE_CLIENT_ID
+        sync: false           # Google Cloud Console의 OAuth 클라이언트 ID
+      - key: JWT_SECRET
+        generateValue: true   # 설정 안 하면 dev 기본값이 쓰여 토큰이 위조 가능
+      # ── 데이터 소스 ────────────────────────────────────────────────────
       - key: DART_API_KEY
         sync: false           # Render 대시보드에서 직접 입력
       - key: FRED_API_KEY

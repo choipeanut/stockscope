@@ -15,10 +15,13 @@ api.interceptors.request.use((config) => {
 });
 
 // 401 → 로그아웃 (토큰 만료 등)
+// 단, 로그인 요청 자체의 401은 제외 — 리로드해버리면 에러 메시지를 못 보여준다.
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    const url = err.config?.url ?? "";
+    const isLoginRequest = url.includes("/auth/google");
+    if (err.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem("auth_token");
       localStorage.removeItem("auth_user");
       window.location.reload();
@@ -26,6 +29,11 @@ api.interceptors.response.use(
     return Promise.reject(err);
   },
 );
+
+/** Render 무료 플랜 cold start 대비 — 백엔드를 미리 깨운다. 실패해도 무시. */
+export function warmUpBackend(): void {
+  api.get("/health", { timeout: 120_000 }).catch(() => {});
+}
 
 export interface OhlcvRow {
   date: string;

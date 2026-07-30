@@ -1,11 +1,20 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { useAuth } from "../contexts/AuthContext";
+import { warmUpBackend } from "../api/client";
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 
 export function LoginPage() {
   const { login } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // 로그인 화면이 뜨는 순간 백엔드를 미리 깨운다. 사용자가 Google 창을
+  // 거치는 동안 cold start가 끝나므로 첫 로그인이 타임아웃으로 죽지 않는다.
+  useEffect(() => {
+    warmUpBackend();
+  }, []);
 
   async function handleSuccess(credentialResponse: { credential?: string }) {
     if (!credentialResponse.credential) return;
@@ -14,7 +23,17 @@ export function LoginPage() {
     try {
       await login(credentialResponse.credential);
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "로그인에 실패했습니다. 다시 시도해 주세요.");
+      const detail = e?.response?.data?.detail;
+      if (detail) {
+        setError(detail);
+      } else if (e?.code === "ECONNABORTED" || !e?.response) {
+        setError(
+          "서버에 연결하지 못했습니다. 무료 서버가 절전에서 깨어나는 중일 수 있습니다 — " +
+            "30초쯤 후 다시 시도해 주세요.",
+        );
+      } else {
+        setError("로그인에 실패했습니다. 다시 시도해 주세요.");
+      }
     } finally {
       setLoading(false);
     }
@@ -87,7 +106,25 @@ export function LoginPage() {
             marginBottom: 16,
           }}
         >
-          {loading ? (
+          {!GOOGLE_CLIENT_ID ? (
+            <div
+              style={{
+                padding: "12px 14px",
+                background: "#2d0c0c",
+                border: "1px solid #7f1d1d",
+                borderRadius: 8,
+                color: "#fca5a5",
+                fontSize: 12,
+                lineHeight: 1.6,
+                textAlign: "left",
+              }}
+            >
+              <strong>설정 오류:</strong> 빌드에 <code>VITE_GOOGLE_CLIENT_ID</code>가
+              없어 Google 로그인을 초기화할 수 없습니다.
+              <br />
+              Vercel → Settings → Environment Variables 에 값을 추가한 뒤 재배포하세요.
+            </div>
+          ) : loading ? (
             <div
               style={{
                 padding: "10px 24px",
