@@ -9,11 +9,31 @@ export function LoginPage() {
   const { login } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [originBlocked, setOriginBlocked] = useState<string | null>(null);
 
   // 로그인 화면이 뜨는 순간 백엔드를 미리 깨운다. 사용자가 Google 창을
   // 거치는 동안 cold start가 끝나므로 첫 로그인이 타임아웃으로 죽지 않는다.
   useEffect(() => {
     warmUpBackend();
+  }, []);
+
+  // Google이 이 출처(origin)를 허용하는지 미리 확인한다. 허용돼 있지 않으면
+  // 버튼은 멀쩡히 그려지지만 눌러도 아무 일도 일어나지 않아서 원인을 알 수
+  // 없다 — 그래서 누르기 전에 미리 알려준다.
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+    const origin = window.location.origin;
+    fetch(
+      `https://accounts.google.com/gsi/status?client_id=${encodeURIComponent(
+        GOOGLE_CLIENT_ID,
+      )}&as=preflight`,
+      { mode: "cors" },
+    )
+      .then((r) => {
+        if (r.status === 403) setOriginBlocked(origin);
+      })
+      // 네트워크 차단·확장프로그램 등으로 확인 자체가 실패하면 조용히 넘어간다.
+      .catch(() => {});
   }, []);
 
   async function handleSuccess(credentialResponse: { credential?: string }) {
@@ -123,6 +143,39 @@ export function LoginPage() {
               없어 Google 로그인을 초기화할 수 없습니다.
               <br />
               Vercel → Settings → Environment Variables 에 값을 추가한 뒤 재배포하세요.
+            </div>
+          ) : originBlocked ? (
+            <div
+              style={{
+                padding: "12px 14px",
+                background: "#2d0c0c",
+                border: "1px solid #7f1d1d",
+                borderRadius: 8,
+                color: "#fca5a5",
+                fontSize: 12,
+                lineHeight: 1.7,
+                textAlign: "left",
+              }}
+            >
+              <strong>이 주소는 Google에 등록되어 있지 않습니다.</strong>
+              <br />
+              Google Cloud Console → 사용자 인증 정보 → 해당 OAuth 클라이언트 →
+              <b> 승인된 JavaScript 원본</b>에 아래 주소를 추가한 뒤 몇 분 기다렸다
+              새로고침하세요.
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: "6px 8px",
+                  background: "#111827",
+                  borderRadius: 6,
+                  color: "#e5e7eb",
+                  fontFamily: "monospace",
+                  fontSize: 12,
+                  wordBreak: "break-all",
+                }}
+              >
+                {originBlocked}
+              </div>
             </div>
           ) : loading ? (
             <div
